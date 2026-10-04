@@ -8,6 +8,16 @@ The command is a bash script. It writes only in `$CLAUDE_CONFIG_DIR/progress`, o
 
 Requirements: Claude Code with function hooks (early access), on Linux, macOS, or Windows with Git Bash.
 
-See the [project README](https://github.com/mhgar/claude-simple-progress-bars#readme) for the API, failure handling, settings, limits, and development notes.
+## What the plugin changes in Claude Code
+
+| Hook | Change |
+| --- | --- |
+| `prompt.compose` | Adds one section, `simple-progress-bars:usage`, at the end of Claude's system prompt. It tells Claude when and how to call `claude-progress`. No other part of the prompt changes. |
+| `tool.call` (Bash) | Notes when each foreground Bash call starts and ends. The command, its input, and its result do not change. |
+| `turn.start`, `turn.complete` | Note whether a turn runs, so the bars go under the right status line. Nothing changes. |
+| `ui.render` (`Spinner`, `TurnDuration`) | Draws the bars under the status line. The status line itself stays as Claude Code draws it. |
+| `session.start` | Reads `CLAUDE_CONFIG_DIR`, `HOME`, and `USERPROFILE` only to find the progress directory, and reads the plugin's own `shim.sh`. No value leaves the machine. |
+
+See the [project README](https://github.com/mhgar/claude-simple-progress-bars#readme) for the API, how a bar ends, settings, and development notes.
 
 License: MIT.
