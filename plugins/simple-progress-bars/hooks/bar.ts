@@ -11,22 +11,23 @@ const ETA_HYSTERESIS = 0.1 // The shown estimate moves only on a change over 10%
 
 function fresh(key: string, name: string, at: number): Bar {
   return {
-    key, name, label: '', done: 0, total: null, unit: '', state: 'run', pid: null,
+    key, name, label: '', done: 0, total: null, unit: '', state: 'run',
     startedAt: at, updatedAt: at, progressAt: at, endedAt: null, samples: 0, rate: null, eta: null,
   }
 }
 
 /** Returns the bar after one update. `at` is the file's modification time. */
 export function apply(prev: Bar | undefined, key: string, name: string, u: Update, at: number): Bar {
-  // A run after an end is a new run, with a new start time.
-  const bar = prev === undefined || (prev.state !== 'run' && u.state === 'run') ? fresh(key, name, at) : prev
-  const pid = u.pid ?? bar.pid
+  // A run after done or fail is a new run, with a new start time. A stopped bar that
+  // gets a new update resumes: the Bash call that seemed to own it was another one.
+  const isNewRun = prev === undefined || ((prev.state === 'complete' || prev.state === 'fail') && u.state === 'run')
+  const bar = isNewRun ? fresh(key, name, at) : prev
 
   switch (u.state) {
     case 'done':
     case 'fail':
       return {
-        ...bar, pid, updatedAt: at, endedAt: at,
+        ...bar, updatedAt: at, endedAt: at,
         state: u.state === 'done' ? 'complete' : 'fail',
         label: u.msg || u.detail || bar.label,
         done: u.total === null ? bar.done : u.done,
@@ -35,12 +36,12 @@ export function apply(prev: Bar | undefined, key: string, name: string, u: Updat
         eta: u.state === 'done' ? 0 : null,
       }
     case 'run':
-      return run(bar, pid, u, at)
+      return run(bar, u, at)
   }
 }
 
-function run(bar: Bar, pid: number | null, u: Update, at: number): Bar {
-  const next: Bar = { ...bar, pid, state: 'run', label: u.detail, unit: u.unit, total: u.total, done: u.done, updatedAt: at }
+function run(bar: Bar, u: Update, at: number): Bar {
+  const next: Bar = { ...bar, state: 'run', label: u.detail, unit: u.unit, total: u.total, done: u.done, updatedAt: at, endedAt: null }
   if (u.total === null) {
     return { ...next, progressAt: u.done === bar.done ? bar.progressAt : at, samples: 0, rate: null, eta: null }
   }
@@ -62,15 +63,15 @@ function run(bar: Bar, pid: number | null, u: Update, at: number): Bar {
   return { ...next, progressAt: at, samples: bar.samples + 1, rate, eta: isSteady ? shown : raw }
 }
 
-/** Ends a running bar whose process has exited: complete at its total, else stopped. */
+/** Ends a running bar whose Bash call ended: complete at its total, else stopped. */
 export function stop(bar: Bar, now: number): Bar {
   if (bar.state !== 'run') return bar
   const isDone = bar.total !== null && bar.done >= bar.total
   return { ...bar, state: isDone ? 'complete' : 'stopped', endedAt: now, eta: isDone ? 0 : null }
 }
 
-/** Returns true when the plugin removes the bar at `now`. `isAlive` is false for a bar with no owner. */
-export function isExpired(bar: Bar, now: number, isAlive: boolean): boolean {
+/** Returns true when the plugin hides the bar at `now`. `isOwned` is true while a Bash call can own it. */
+export function isExpired(bar: Bar, now: number, isOwned: boolean): boolean {
   switch (bar.state) {
     case 'complete':
       return now - (bar.endedAt ?? now) > COMPLETE_HOLD_MS
@@ -78,7 +79,7 @@ export function isExpired(bar: Bar, now: number, isAlive: boolean): boolean {
     case 'stopped':
       return now - (bar.endedAt ?? now) > FAIL_HOLD_MS
     case 'run':
-      // A live process keeps its bar. A bar with no process expires after 10 minutes.
-      return !isAlive && now - bar.updatedAt > EXPIRE_MS
+      // A running Bash call keeps its bars. Other bars go 10 minutes after their last update.
+      return !isOwned && now - bar.updatedAt > EXPIRE_MS
   }
 }

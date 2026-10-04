@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  command:
+    name: Command tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - run: plugins/simple-progress-bars/tests/cli-test.sh
+
+  plugin:
+    name: Plugin tests and specs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: claude plugin validate --strict plugins/simple-progress-bars
+      - run: claude plugin validate .
+      - run: claude plugin test plugins/simple-progress-bars
+      - run: npx -y @fission-ai/openspec@1.14.0 validate --specs --strict
+        env:
+          OPENSPEC_TELEMETRY: '0'

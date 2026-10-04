@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { promptSection } from './prompt'
+import { promptSection } from '../hooks/prompt'
 
 describe('promptSection', () => {
   test('names the time threshold', () => {

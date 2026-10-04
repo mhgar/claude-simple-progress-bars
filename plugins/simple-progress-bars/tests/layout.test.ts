@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { run, steady } from './fixtures'
-import { layout, rows, truncate, width } from './layout'
+import { layout, rows, truncate, width } from '../hooks/layout'
 
 const text = (pieces: { text: string }[]) => pieces.map(p => p.text).join('')
 

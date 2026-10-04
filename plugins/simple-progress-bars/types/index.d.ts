@@ -1,6 +1,6 @@
 /**
  * run: in progress. complete: done. fail: the script reported a failure.
- * stopped: the reporting process exited before the task was done.
+ * stopped: the Bash call that ran it ended before the task was done.
  */
 export type BarState = 'run' | 'complete' | 'fail' | 'stopped'
 
@@ -9,7 +9,7 @@ export type BarUnit = '' | 'B' | '%'
 
 /** One task as the plugin shows it. All times are ms since the epoch. */
 export type Bar = {
-  /** The task file's path: unique across the watched session directories. */
+  /** The path of the task file: unique across the watched session directories. */
   key: string
   /** The task name: the file name. */
   name: string
@@ -20,8 +20,6 @@ export type Bar = {
   total: number | null
   unit: BarUnit
   state: BarState
-  /** The process that reports progress, or null when the file names none. */
-  pid: number | null
   /** The first update of this run. */
   startedAt: number
   /** The file's modification time at the last update. */
@@ -42,6 +40,6 @@ export type Board = { bars: Bar[]; now: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'simple-progress-bars': { board: Board }
+    'simple-progress-bars': { board: Board; isWorking: boolean }
   }
 }

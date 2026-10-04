@@ -1,0 +1,3 @@
+# Bash runs these files on Windows too (Git Bash), where CRLF line ends break them.
+*.sh text eol=lf
+plugins/simple-progress-bars/bin/claude-progress text eol=lf

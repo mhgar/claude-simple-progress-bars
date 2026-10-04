@@ -1,615 +1,100 @@
-#!/usr/bin/env python3
-"""claude-progress: report script progress to the Claude Code progress bar.
+#!/usr/bin/env bash
+# claude-progress: report the progress of a task to the Simple Progress Bars plugin.
+#
+# Each call writes a line to <dir>/<session id>/<task name>. The plugin reads the
+# lines in order. A new count or percent replaces the file, and every other report
+# appends a line, so the command needs no lock.
+
+usage() {
+  cat <<'EOF'
+claude-progress: report the progress of a task to the Claude Code progress bars.
 
 Usage:
   claude-progress [-n NAME] [-t TOTAL] VALUE [DETAIL...]
-  claude-progress [-n NAME] [-t TOTAL] (-l | -b | -p) [DETAIL...] [-- COMMAND ARGS...]
+  claude-progress -n NAME -t TOTAL
 
-Options come first. The first other word is VALUE, and every word after it
-is DETAIL text, also words that start with "-".
+Options come first. The first other word is VALUE, and every word after it is
+DETAIL text.
 
 VALUE forms:
   17/240          17 of 240 done. Sizes work too: 1.5G/4G, 300MiB/2GiB
   42%             percent done
   +1, +5, +512M   add to the count. Safe from parallel workers
-  Scanning disk   text with no number. Keeps the count and total, if any
+  Scanning disk   text with no number. The count and the total stay
   done [MSG]      the task is complete
-  fail [MSG]      the task failed. The bar turns red
-  clear           remove the bar now
+  fail [MSG]      the task failed
+  clear           remove the task now
 
 Options:
-  -n NAME     task name. Default: the name of the calling script
-  -t TOTAL    set the total. Use it alone, or with +N or a pipe mode
-  -l          pipe mode: count lines of output
-  -b          pipe mode: count bytes of output
-  -p          pipe mode: read N/M or N% from the output (tqdm, pv, rsync)
-  --dir       print the progress directory for this user, then exit
+  -n NAME     task name. Default: task
+  -t TOTAL    set the total. Alone, it starts the task at 0
+  --dir       print the progress directory, then exit
   -h, --help  show this reference
 
-Pipe modes read standard input, or run COMMAND after "--". They pass all
-output through without change. -l and -b count standard output only. With
-"--", claude-progress reports done or fail from the exit status of COMMAND
-and exits with that status, a signal included. It sets PYTHONUNBUFFERED=1
-for COMMAND. Other programs can buffer their output when it goes to a pipe:
-use "stdbuf -oL COMMAND" on Linux.
-
-Examples:
-  for f in *.mkv; do claude-progress -n convert "$((++i))/$n" "$f"; ffmpeg ...; done
-  claude-progress -n convert done
-  find / -name '*.log' | claude-progress -n scan -l -t 5000 > logs.txt
-  claude-progress -n train -p -- python train.py
-  claude-progress -n thumbs -t 500
-  ls *.jpg | xargs -P8 -I{} sh -c 'mk {} && claude-progress -n thumbs +1'
-
-Behavior:
-  - If CLAUDE_CODE_SESSION_ID is not set, claude-progress reports nothing.
-    Pipe modes still pass output through, and "--" still runs COMMAND.
-  - claude-progress never fails a script. It prints warnings to stderr and
-    exits 0, except with "--", where it exits with the status of COMMAND.
-  - Each call starts a process (about 15 ms). In fast loops, report every
-    Nth item, or use a pipe mode, which writes at most 5 times per second.
-  - If the reporting process exits before "done", the bar shows "stopped".
-    A bar that reached its total shows "done".
-
-Files: <dir>/<session-id>/<name>, one JSON object per task. <dir> is
-$PROGRESS_DIR, else $XDG_RUNTIME_DIR/claude-progress, else
-$TMPDIR/claude-progress, else /tmp/claude-progress-<uid>. The Simple
-Progress Bars plugin reads these files.
-"""
-
-# Each call is a new process, so the top level imports only what every call
-# needs. The modules that only some paths need are imported where they are
-# used: importing them all costs 7 ms more on each call (21 ms against 14 ms).
-import json
-import os
-import re
-import sys
-
-THROTTLE_S = 0.2  # Pipe modes write at most 5 times a second. The bar reads 4 times a second.
-JOIN_S = 1.0  # After COMMAND exits, wait this long for output that is still in its pipes.
-SCAN_CHARS = 256  # Parse mode reads only the newest output, so a long line costs no time.
-
-NUMBER = r'\d{1,15}(?:,\d{3})*(?:\.\d{1,6})?'
-UNIT = r'(?:[KMGTP]i?B?|kB|B)'  # attached to the number: 1.5G, 300MiB, 12kB
-FACTORS = {'': 1, 'B': 1, 'K': 1024, 'k': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4, 'P': 1024**5}
-RE_SIZE = re.compile(rf'({NUMBER})({UNIT})?')
-RE_COUNT = re.compile(rf'({NUMBER})({UNIT})?\s*/\s*({NUMBER})({UNIT})?')
-RE_PERCENT = re.compile(r'(\d{1,3}(?:\.\d{1,6})?)\s*%')
-# In output: a count that is not part of a longer word, path, date, or address.
-RE_OUT_COUNT = re.compile(
-    rf'(?<![\w/.,=:-])({NUMBER})({UNIT})?\s*/\s*({NUMBER})({UNIT})?(?:\s({UNIT})\b)?(?![\w/.])')
-RE_OUT_PERCENT = re.compile(r'(?<![\w.])(\d{1,3}(?:\.\d{1,6})?)\s*%')
-
-
-def warn(msg):
-    print(f'claude-progress: {msg}', file=sys.stderr)
-
-
-# --- Values -----------------------------------------------------------------
-
-def size(number, unit):
-    """Returns (value, is_bytes) for a number and an optional size unit."""
-    value = float(number.replace(',', ''))
-    unit = unit or ''
-    return value * FACTORS[unit[:1]], unit != ''
-
-
-def parse_total(text):
-    """Returns (total, is_bytes), or None for text that is not a size."""
-    m = RE_SIZE.fullmatch(text.strip())
-    return size(m.group(1), m.group(2)) if m else None
-
-
-def parse_value(word):
-    """Returns (kind, fields) for VALUE. `fields` holds the record fields that VALUE sets.
-
-    The kinds: 'total' (no VALUE, only -t), 'clear', 'done', 'fail', 'add',
-    'count', 'percent', and 'text'.
-    """
-    if word is None:
-        return 'total', {}
-    lower = word.lower()
-    if lower in ('clear', 'done', 'fail', 'failed'):
-        return ('fail' if lower == 'failed' else lower), {}
-    if word.startswith('+'):
-        step = parse_total(word[1:])
-        if step is not None:
-            return 'add', {'step': step[0], 'is_bytes': step[1]}
-    m = RE_COUNT.fullmatch(word)
-    if m:
-        done, done_bytes = size(m.group(1), m.group(2))
-        total, total_bytes = size(m.group(3), m.group(4))
-        return 'count', {'done': done, 'total': total, 'unit': 'B' if done_bytes or total_bytes else ''}
-    m = RE_PERCENT.fullmatch(word)
-    if m and float(m.group(1)) <= 100:
-        return 'percent', {'done': float(m.group(1)), 'total': 100.0, 'unit': '%'}
-    return 'text', {}
-
-
-def record(*, state='run', done=0.0, total=None, unit='', detail='', msg='', pid=None):  # noqa: PLR0913  (one argument a field)
-    """Returns one task record, the JSON object that the plugin reads."""
-    return {'state': state, 'done': done, 'total': total, 'unit': unit,
-            'detail': detail, 'msg': msg, 'pid': pid}
-
-
-def is_alive(pid):
-    if not pid:
-        return False
-    try:
-        os.kill(pid, 0)
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
-# --- Task files -------------------------------------------------------------
-
-def base_dir():
-    """Returns the progress directory for this user. The plugin asks for it with --dir."""
-    if os.environ.get('PROGRESS_DIR'):
-        return os.environ['PROGRESS_DIR'].rstrip('/') or '/'
-    for var in ('XDG_RUNTIME_DIR', 'TMPDIR'):
-        if os.environ.get(var):
-            return os.path.join(os.environ[var], 'claude-progress')
-    # /tmp is shared by all users, so each user gets a directory of their own.
-    return f'/tmp/claude-progress-{os.getuid()}'
-
-
-def clean_name(name):
-    """Returns a task name that is a safe file name. It never starts with a dot:
-    dot files in the session directory belong to the store, and the plugin skips them."""
-    name = re.sub(r'[/\0\r\n]', '-', name).strip().lstrip('.')[:80]
-    return name or 'task'
-
-
-class Store:
-    """One task file. Writes are atomic, and changes run under a file lock."""
-
-    def __init__(self, session_dir, name):
-        self.dir = session_dir
-        self.name = clean_name(name)
-        self.path = os.path.join(session_dir, self.name)
-        self.has_dir = False
-        self.failed = False
-
-    def lock_path(self):
-        return os.path.join(self.dir, f'.{self.name}.lock')
-
-    def make_dir(self):
-        if not self.has_dir:
-            os.makedirs(self.dir, mode=0o700, exist_ok=True)
-            self.has_dir = True
-
-    def read(self):
-        try:
-            with open(self.path) as f:
-                data = json.load(f)
-        except (OSError, ValueError):
-            return record()
-        return {**record(), **data} if isinstance(data, dict) else record()
-
-    def write(self, data):
-        """Writes the record. A failure warns once and never stops the caller."""
-        try:
-            self.make_dir()
-            tmp = os.path.join(self.dir, f'.{self.name}.{os.getpid()}.tmp')
-            with open(tmp, 'w') as f:
-                json.dump(data, f)
-            os.replace(tmp, self.path)
-        except OSError as e:
-            if not self.failed:
-                warn(e)
-            self.failed = True
-
-    def update(self, change):
-        """Reads the record, applies `change`, and writes the result under a lock."""
-        import fcntl  # noqa: PLC0415  (startup time, see the imports)
-        try:
-            self.make_dir()
-            lock = open(self.lock_path(), 'w')  # noqa: SIM115  (held for the whole change)
-        except OSError as e:
-            warn(e)
-            return
-        with lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            self.write(change(self.read()))
-
-    def clear(self):
-        import contextlib  # noqa: PLC0415  (startup time, see the imports)
-        for path in (self.path, self.lock_path()):
-            with contextlib.suppress(OSError):
-                os.remove(path)
-
-
-class NullStore:
-    """A store that keeps nothing: the work runs, and nothing is reported."""
-
-    def read(self):
-        return record()
-
-    def write(self, data):
-        pass
-
-    def update(self, change):
-        pass
-
-    def clear(self):
-        pass
-
-
-# --- Direct reports ---------------------------------------------------------
-
-def owner(prev, caller):
-    """Returns the pid that the bar watches. Workers that add +N keep a live owner."""
-    if is_alive(prev.get('pid')):
-        return prev['pid']
-    # The first owner is gone, for example a total set in an earlier Bash
-    # call. The process group of this worker lives as long as its Bash call.
-    return os.getpgrp() if caller is None else caller
-
-
-def report(store, args):
-    """Writes one direct report: VALUE and DETAIL from the command line."""
-    kind, fields = parse_value(args.value)
-    detail = ' '.join(args.detail)
-    if kind == 'clear':
-        store.clear()
-        return
-
-    def change(prev):
-        caller = None if kind == 'add' else os.getppid()
-        if prev['state'] != 'run' and kind not in ('done', 'fail'):
-            prev = record()  # a new run after an end starts from zero
-        rec = {**prev, 'state': 'run', 'msg': '', 'pid': owner(prev, caller)}
-        if kind in ('done', 'fail'):
-            rec.update(state=kind, msg=detail)
-        elif kind == 'add':
-            rec['done'] += fields['step']
-            rec['unit'] = 'B' if fields['is_bytes'] else rec['unit']
-            rec['detail'] = detail or rec['detail']
-        elif kind in ('count', 'percent'):
-            rec.update(fields, detail=detail)
-        elif kind == 'text':  # a new detail. The count and the total stay.
-            rec['detail'] = ' '.join([args.value, *args.detail])
-        if args.total is not None:
-            rec['total'], rec['unit'] = args.total[0], 'B' if args.total[1] else rec['unit']
-        if kind == 'done' and rec['total']:
-            rec['done'] = rec['total']  # The last report is often "N-1 of N", before the last item.
-        return rec
-
-    store.update(change)
-
-
-# --- Pipe modes -------------------------------------------------------------
-
-class Meter:
-    """Counts or parses output, and writes the record at most every THROTTLE_S."""
-
-    def __init__(self, store, args):
-        import threading  # noqa: PLC0415  (startup time, see the imports)
-        self.store, self.args = store, args
-        self.lock = threading.Lock()
-        self.stop = threading.Event()
-        self.done = 0.0
-        self.total = args.total[0] if args.total else None
-        self.unit = 'B' if args.mode == 'bytes' or (args.total and args.total[1]) else ''
-        self.tails = {}
-        self.source = None  # (stream, kind) of the first progress found in parse mode
-        self.dirty = False
-        self.flusher = threading.Thread(target=self.flush_loop, daemon=True)
-
-    def start(self):
-        self.store.write(self.snapshot('run'))
-        self.flusher.start()
-
-    def add(self, stream, chunk):
-        with self.lock:
-            if self.args.mode == 'lines' and stream == 'stdout':
-                self.done += chunk.count(b'\n')
-            elif self.args.mode == 'bytes' and stream == 'stdout':
-                self.done += len(chunk)
-            elif self.args.mode == 'parse':
-                self.scan(stream, chunk)
-            else:
-                return
-            self.dirty = True
-
-    def scan(self, stream, chunk):
-        # Decode only the end of the chunk. Its first character can be cut, so keep only SCAN_CHARS.
-        cut = 4 * SCAN_CHARS
-        text = chunk[-cut:].decode(errors='replace')
-        if len(chunk) < cut:
-            text = self.tails.get(stream, '') + text
-        text = text[-SCAN_CHARS:]
-        self.tails[stream] = text
-        # The newest segment with progress wins. tqdm and pv end a segment with \r.
-        for segment in reversed(re.split(r'[\r\n]', text)):
-            found = find_progress(segment)
-            if found is None:
-                continue
-            kind = found[0]
-            if self.source is None:
-                self.source = (stream, kind)
-            if self.source == (stream, kind):
-                _, self.done, self.total, self.unit = found
-            return
-
-    def snapshot(self, state, msg=''):
-        """Returns the record now. The caller holds the lock, or no other thread runs yet."""
-        self.dirty = False
-        return record(state=state, done=self.done, total=self.total, unit=self.unit,
-                      detail=' '.join(self.args.detail), msg=msg, pid=os.getpid())
-
-    def flush_loop(self):
-        while not self.stop.wait(THROTTLE_S):
-            with self.lock:
-                rec = self.snapshot('run') if self.dirty else None
-            if rec is not None:
-                self.store.write(rec)  # outside the lock, so the pass-through never waits on a write
-
-    def finish(self, state, msg=''):
-        self.stop.set()
-        with self.lock:
-            if state == 'done' and self.total:
-                if self.args.mode in ('lines', 'bytes'):
-                    self.total = self.done  # A measured count is the truth. The total was a guess.
-                else:
-                    self.done = max(self.done, self.total)  # Parsed output can stop before 100%.
-            rec = self.snapshot(state, msg)
-        self.store.write(rec)
-
-
-def find_progress(segment):
-    """Returns ('count' or 'percent', done, total, unit) for one segment of output, or None."""
-    # A percent wins over a count in the same segment: rsync prints both, and its count runs down.
-    percents = [float(m.group(1)) for m in RE_OUT_PERCENT.finditer(segment)]
-    percents = [p for p in percents if p <= 100]
-    if percents:
-        return ('percent', percents[-1], 100.0, '%')
-    for m in reversed(list(RE_OUT_COUNT.finditer(segment))):
-        spaced = m.group(5)  # "4.5/4.5 MB": a unit after a space is for both numbers
-        done, done_bytes = size(m.group(1), m.group(2) or spaced)
-        total, total_bytes = size(m.group(3), m.group(4) or spaced)
-        if total > 0 and done <= total:
-            return ('count', done, total, 'B' if done_bytes or total_bytes else '')
-    return None
-
-
-def pump(src, dst, on_chunk):
-    """Copies src to dst and gives each chunk to on_chunk. Returns False if dst closed."""
-    while True:
-        chunk = src.read1(65536)
-        if not chunk:
-            return True
-        try:
-            dst.write(chunk)
-            dst.flush()
-        except BrokenPipeError:
-            return False
-        on_chunk(chunk)
-
-
-def die_like(signum):
-    """Ends this process by the same signal, so the shell sees a signal death."""
-    import signal  # noqa: PLC0415  (startup time, see the imports)
-    # Point stdout at /dev/null, so no flush at exit fails on a closed pipe.
-    os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-    signal.signal(signum, signal.SIG_DFL)
-    os.kill(os.getpid(), signum)
-    return 128 + signum
-
-
-def pipe_stdin(meter):
-    """Meters standard input. Returns the exit status."""
-    import signal  # noqa: PLC0415  (startup time, see the imports)
-    meter.start()
-    try:
-        is_open = pump(sys.stdin.buffer, sys.stdout.buffer, lambda c: meter.add('stdout', c))
-    except KeyboardInterrupt:
-        meter.finish('fail', 'interrupted')
-        return die_like(signal.SIGINT)
-    meter.finish('done')
-    # A closed reader (`| head`) ends this filter by SIGPIPE, as it ends cat.
-    return 0 if is_open else die_like(signal.SIGPIPE)
-
-
-def start(command):
-    """Starts COMMAND. Returns (child, None), or (None, exit status) as a shell gives it."""
-    import subprocess  # noqa: PLC0415  (startup time, see the imports)
-    env = {**os.environ, 'PYTHONUNBUFFERED': '1'}
-    try:
-        return subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env), None
-    except FileNotFoundError:
-        warn(f'{command[0]}: command not found')
-        return None, 127
-    except OSError as e:
-        warn(f'{command[0]}: {e.strerror}')
-        return None, 126
-
-
-def wait(child):
-    """Waits for the child. SIGINT reaches it from the terminal. SIGTERM and SIGHUP pass on to it."""
-    import signal  # noqa: PLC0415  (startup time, see the imports)
-
-    def forward(signum, _frame):
-        child.send_signal(signum)
-
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-    signal.signal(signal.SIGTERM, forward)
-    signal.signal(signal.SIGHUP, forward)
-    return child.wait()
-
-
-def pipe_command(meter, command):
-    """Runs COMMAND and meters its output. Returns its exit status."""
-    import threading  # noqa: PLC0415  (startup time, see the imports)
-    child, status = start(command)
-    if child is None:
-        meter.store.write(record(state='fail', msg=f'exit {status}', pid=os.getpid()))
-        return status
-    meter.start()
-
-    def run_pump(src, dst, stream):
-        if not pump(src, dst, lambda c: meter.add(stream, c)):
-            src.close()  # The reader closed: COMMAND gets SIGPIPE on its next write.
-
-    pumps = [threading.Thread(target=run_pump, args=args, daemon=True) for args in (
-        (child.stdout, sys.stdout.buffer, 'stdout'), (child.stderr, sys.stderr.buffer, 'stderr'))]
-    for t in pumps:
-        t.start()
-    code = wait(child)
-    for t in pumps:
-        t.join(JOIN_S)  # A background grandchild can hold the pipes open for ever.
-
-    if code < 0:
-        meter.finish('fail', f'signal {-code}')
-        return die_like(-code)
-    meter.finish('done' if code == 0 else 'fail', '' if code == 0 else f'exit {code}')
-    return code
-
-
-# --- Command line -----------------------------------------------------------
-
-class Args:
-    """The parsed command line."""
-
-    def __init__(self):
-        self.name = None
-        self.total = None  # (value, is_bytes)
-        self.mode = None  # 'lines', 'bytes' or 'parse'
-        self.value = None
-        self.detail = []
-        self.command = None
-
-
-MODES = {'-l': 'lines', '--lines': 'lines', '-b': 'bytes', '--bytes': 'bytes', '-p': 'parse', '--parse': 'parse'}
-
-
-def parse_args(argv):
-    """Returns (Args, None), or (Args, error text)."""
-    args, error = read_words(argv)
-    if args.command is not None:
-        args.mode = args.mode or 'parse'
-    if error:
-        return args, error
-    if args.command == []:
-        return args, 'no command after --'
-    if args.mode is None and args.value is None and args.total is None:
-        return args, 'nothing to report. See claude-progress --help'
-    if args.mode and args.command is None and args.detail and looks_like_command(args.detail[0]):
-        warn(f'"{args.detail[0]}" is detail text here. Use "-- {args.detail[0]} ..." to run it.')
-    return args, None
-
-
-def read_words(argv):
-    """Sorts the words of the command line into Args. Returns (Args, the first error or None).
-
-    Options come first. A "--" among them starts COMMAND. In a direct report,
-    the first other word is VALUE and the rest is DETAIL, "--" included. In a
-    pipe mode, the other words up to "--" are DETAIL. After a bad option the
-    parse goes on, so the fallback still finds COMMAND.
-    """
-    args = Args()
-    error = None
-    i = 0
-    while i < len(argv):
-        word = argv[i]
-        if word == '--':
-            args.command = argv[i + 1:]
-            break
-        if word in MODES:
-            args.mode = MODES[word]
-            i += 1
-        elif word in ('-n', '--name', '-t', '--total'):
-            if i + 1 == len(argv):
-                return args, f'{word} needs a value'
-            if word in ('-n', '--name'):
-                args.name = argv[i + 1]
-            else:
-                args.total = parse_total(argv[i + 1])
-                if args.total is None:
-                    error = error or f'bad total: {argv[i + 1]!r}'
-            i += 2
-        elif args.mode is None:
-            args.value, args.detail = word, argv[i + 1:]
-            break
-        else:  # in a pipe mode the other words up to "--" are the detail text
-            rest = argv[i:]
-            cut = rest.index('--') if '--' in rest else len(rest)
-            args.detail = rest[:cut]
-            args.command = rest[cut + 1:] if cut < len(rest) else None
-            break
-    return args, error
-
-
-def looks_like_command(word):
-    import shutil  # noqa: PLC0415  (startup time, see the imports)
-    return shutil.which(word) is not None
-
-
-def default_name(command):
-    """Returns the task name from COMMAND, or from the calling script."""
-    if command:
-        return name_from_argv(command) or 'task'
-    try:
-        with open(f'/proc/{os.getppid()}/cmdline', 'rb') as f:
-            argv = [a.decode(errors='replace') for a in f.read().split(b'\0')]
-    except OSError:
-        # No /proc (macOS): ask ps. A split on spaces is enough for a name.
-        import subprocess  # noqa: PLC0415  (startup time, see the imports)
-        try:
-            out = subprocess.run(['ps', '-o', 'args=', '-p', str(os.getppid())],
-                                 capture_output=True, text=True, timeout=2, check=False).stdout
-        except (OSError, subprocess.SubprocessError):
-            return 'task'
-        argv = out.split()
-    return name_from_argv(argv) or 'task'
-
-
-RUNNERS = {'bash', 'sh', 'zsh', 'dash', 'fish', 'python', 'node', 'ruby', 'perl', 'uv', 'env', 'nice', 'time'}
-
-
-def name_from_argv(argv):
-    """Returns a task name from a command line, or None for an inline shell command."""
-    words = [os.path.basename(a) for a in argv if a]
-    while words and re.sub(r'[\d.]+$', '', words[0]) in RUNNERS:
-        if '-c' in words[1:3]:
-            return None
-        words = [w for w in words[1:] if not w.startswith('-')]
-    return os.path.splitext(words[0])[0] if words else None
-
-
-def run(args, store):
-    """Does the work, and reports it to `store`. Returns the exit status."""
-    if args.mode is None:
-        report(store, args)
-        return 0
-    if args.command is None and sys.stdin.isatty():
-        warn('a pipe mode needs input or "-- COMMAND"')
-        return 0
-    meter = Meter(store, args)
-    return pipe_stdin(meter) if args.command is None else pipe_command(meter, args.command)
-
-
-def main(argv):
-    """Returns the exit status."""
-    if not argv or argv[0] in ('-h', '--help'):
-        print(__doc__.strip())
-        return 0
-    if argv[0] == '--dir':
-        print(base_dir())
-        return 0
-    args, error = parse_args(argv)
-    if error:
-        warn(error)
-    session = os.environ.get('CLAUDE_CODE_SESSION_ID')
-    # A usage error, or no session, still does the work, with nothing reported: the script must not break.
-    if error or not session:
-        return run(args, NullStore())
-    return run(args, Store(os.path.join(base_dir(), clean_name(session)), args.name or default_name(args.command)))
-
-
-if __name__ == '__main__':
-    sys.exit(main(sys.argv[1:]))
+The command reports nothing outside a Claude Code session, and it never fails
+a script: it always exits 0. Each call takes a few milliseconds.
+
+Files: <dir>/<session id>/<name>, where <dir> is $CLAUDE_CONFIG_DIR/progress,
+or ~/.claude/progress.
+EOF
+}
+
+warn() { printf 'claude-progress: %s\n' "$1" >&2; }
+
+base="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/progress"
+
+case ${1-} in
+  '' | -h | --help) usage; exit 0 ;;
+  --dir) printf '%s\n' "$base"; exit 0 ;;
+esac
+
+name=task
+total=
+while [ $# -gt 0 ]; do
+  case $1 in
+    -n | --name | -t | --total)
+      if [ $# -lt 2 ]; then warn "$1 needs a value"; exit 0; fi
+      case $1 in -n | --name) name=$2 ;; *) total=$2 ;; esac
+      shift 2 ;;
+    *) break ;;
+  esac
+done
+
+session=${CLAUDE_CODE_SESSION_ID-}
+# A session ID is a plain name. Anything else reports nothing.
+case $session in '' | *[!A-Za-z0-9_-]*) exit 0 ;; esac
+if [ $# -eq 0 ] && [ -z "$total" ]; then warn 'nothing to report. See claude-progress --help'; exit 0; fi
+
+# A task name is a file name: no path, no line break, and no leading dot.
+name=${name//[\/$'\n'$'\r']/-}
+while [ "${name#.}" != "$name" ]; do name=${name#.}; done
+name=${name:0:80}
+[ -n "$name" ] || name=task
+
+dir="$base/$session"
+if [ ! -d "$dir" ]; then
+  # A new session also removes the directories that old sessions left.
+  find "$base" -mindepth 1 -maxdepth 1 -type d -mmin +1440 -exec rm -rf {} + 2>/dev/null
+  (umask 077 && mkdir -p "$dir") 2>/dev/null || { warn "cannot create $dir"; exit 0; }
+fi
+file="$dir/$name"
+
+value=${1-}
+[ $# -gt 0 ] && shift
+line=$value${*:+ $*}
+
+out=
+if [ -n "$value" ]; then out="$line"$'\n'; fi
+if [ -n "$total" ]; then out+="total $total"$'\n'; fi
+
+case $value in
+  clear) rm -f "$file"; exit 0 ;;
+  # A new count or percent, or a total alone, starts the file again. The plugin skips
+  # dot files, so it never sees the temporary file before the rename.
+  [0-9]*/[0-9]* | [0-9]*% | '')
+    tmp="$dir/.$name.$$"
+    { printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$file"; } 2>/dev/null || { rm -f "$tmp"; warn "cannot write $file"; } ;;
+  # Every other report appends. One small append is one write, so parallel workers need no lock.
+  *) printf '%s' "$out" >> "$file" 2>/dev/null || warn "cannot write $file" ;;
+esac
+exit 0

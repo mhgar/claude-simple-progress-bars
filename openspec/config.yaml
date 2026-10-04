@@ -1,0 +1,19 @@
+schema: spec-driven
+
+context: |
+  Simple Progress Bars is a Claude Code plugin. It has three parts: the claude-progress
+  command (a bash script with no other runtime), a mod of function hooks (TypeScript)
+  that only reads files and runs no processes, and a one-line shim for scripts that run
+  where the command is not installed.
+  The specs under openspec/specs are the source of truth for what the code does.
+  Designs and tasks must cover Linux, macOS, and Windows.
+  Write every artifact in ASD-STE100 Simplified Technical English: sentences of 25 words
+  or fewer, active voice, no contractions, no semicolons. Use MUST for normative text.
+  Never use SHALL, should, would, may, might, or could.
+
+rules:
+  specs:
+    - State one observable behavior per requirement. Put examples and edge cases in scenarios.
+    - Name exact values (paths, times, exit statuses, texts) where a user or a script can see them.
+  tasks:
+    - Each task names the tests that prove it.

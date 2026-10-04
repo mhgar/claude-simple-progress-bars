@@ -3,20 +3,24 @@
   "displayName": "Simple Progress Bars",
   "version": "0.1.0",
   "description": "Progress bars with time estimates for long scripts that Claude runs. Scripts report with one command: claude-progress 17/240.",
-  "author": { "name": "Max Hunter", "url": "https://github.com/mhgar" },
-  "homepage": "https://github.com/mhgar/simple-progress-bars",
-  "repository": "https://github.com/mhgar/simple-progress-bars",
+  "author": {
+    "name": "Max Hunter",
+    "url": "https://github.com/mhgar"
+  },
+  "homepage": "https://github.com/mhgar/claude-simple-progress-bars",
+  "repository": "https://github.com/mhgar/claude-simple-progress-bars",
   "license": "MIT",
-  "keywords": ["progress", "progress-bar", "eta", "tqdm", "scripts", "mod", "function-hooks"],
+  "keywords": [
+    "progress",
+    "progress-bar",
+    "eta",
+    "tqdm",
+    "scripts",
+    "mod",
+    "function-hooks"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
-    "position": {
-      "type": "string",
-      "title": "Bar position",
-      "description": "below: under the mode line (default). above: in the band above the prompt.",
-      "default": "below",
-      "options": ["below", "above"]
-    },
     "maxRows": {
       "type": "number",
       "title": "Most rows of bars",

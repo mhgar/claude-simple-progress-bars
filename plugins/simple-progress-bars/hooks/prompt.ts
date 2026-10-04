@@ -1,7 +1,7 @@
 /** Returns the system prompt section that teaches Claude the command. */
 export function promptSection(minSeconds: number, shim: string | null): string {
   const portable = shim === null ? [] : [
-    'In a bash script file that people can run outside Claude Code, put these lines near the top, so the calls do nothing there:',
+    'In a script file that people can run outside Claude Code, put these lines near the top, so the calls do nothing there:',
     '```bash',
     shim.trim(),
     '```',
@@ -17,10 +17,9 @@ export function promptSection(minSeconds: number, shim: string | null): string {
     '- `claude-progress -n NAME 42% [detail]` for percent',
     '- `claude-progress -n NAME -t 500` once, then `claude-progress -n NAME +1` from parallel workers',
     '- `claude-progress -n NAME done` at the end, or `claude-progress -n NAME fail "message"` on an error',
-    '- `cmd | claude-progress -n NAME -l -t 5000` counts lines and passes them through (`-b` counts bytes)',
-    '- `claude-progress -n NAME -p -- python train.py` reads tqdm, pv, or rsync output from the command and reports its exit status',
+    '- `claude-progress -n NAME Scanning disk` for text with no number',
     '',
-    'Each call takes about 15 ms, so in fast loops report every Nth item. The command never fails the script.',
+    'The command never fails the script. A bar ends when its Bash call ends, so run the script in the foreground when you can. In fast loops, report every Nth item.',
     ...portable,
     'Run `claude-progress --help` for the full reference.',
   ].join('\n')

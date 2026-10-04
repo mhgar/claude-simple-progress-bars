@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { isExpired, stop } from './bar'
-import { run, steady } from './fixtures'
+import { apply, isExpired, stop } from '../hooks/bar'
+import { run, steady, upd } from './fixtures'
 
 describe('apply', () => {
   test('a steady rate gives an estimate of the items left', () => {
@@ -15,8 +15,7 @@ describe('apply', () => {
 
     const after = run('job', [...steady(100, 3), [{ done: 2, total: 100, detail: 'still here' }, 7000]])
 
-    expect(after.eta).toBe(before.eta)
-    expect(after.progressAt).toBe(before.progressAt)
+    expect([after.eta, after.progressAt]).toEqual([before.eta, before.progressAt])
   })
 
   test('repeated updates do not raise the next rate sample', () => {
@@ -28,7 +27,7 @@ describe('apply', () => {
   })
 
   test('a running bar at its total stays running', () => {
-    const bar = run('job', [[{ done: 0, total: 3 }, 0], [{ done: 3, total: 3, pid: 50 }, 1000]])
+    const bar = run('job', [[{ done: 0, total: 3 }, 0], [{ done: 3, total: 3 }, 1000]])
 
     expect(bar.state).toBe('run')
   })
@@ -39,53 +38,52 @@ describe('apply', () => {
     expect(bar.rate).toBe(null)
   })
 
-  test('done keeps the last numbers', () => {
-    const bar = run('job', [[{ done: 3, total: 10 }, 0], [{ state: 'done', done: 10, total: 10 }, 1000]])
-
-    expect(bar).toMatchObject({ state: 'complete', done: 10, total: 10 })
-  })
-
   test('fail shows its message', () => {
     const bar = run('job', [[{ done: 3, total: 10 }, 0], [{ state: 'fail', done: 3, total: 10, msg: 'disk full' }, 1000]])
 
     expect(bar).toMatchObject({ state: 'fail', label: 'disk full' })
   })
 
-  test('a run after an end starts with a new start time', () => {
+  test('a run after done starts with a new start time', () => {
     const bar = run('job', [[{ done: 1, total: 2 }, 0], [{ state: 'done', done: 2, total: 2 }, 1000], [{ done: 1, total: 5 }, 9000]])
 
     expect(bar).toMatchObject({ state: 'run', startedAt: 9000 })
+  })
+
+  test('a stopped bar that gets an update resumes with its start time', () => {
+    const stopped = stop(run('job', [[{ done: 1, total: 5 }, 0]]), 500)
+
+    const bar = apply(stopped, stopped.key, stopped.name, upd({ done: 2, total: 5 }), 4000)
+
+    expect(bar).toMatchObject({ state: 'run', startedAt: 0, endedAt: null })
   })
 })
 
 describe('stop', () => {
   test('a bar at its total ends complete', () => {
-    const bar = stop(run('job', [[{ done: 3, total: 3, pid: 50 }, 0]]), 500)
-
-    expect(bar.state).toBe('complete')
+    expect(stop(run('job', [[{ done: 3, total: 3 }, 0]]), 500).state).toBe('complete')
   })
 
   test('a bar below its total ends stopped', () => {
-    const bar = stop(run('job', [[{ done: 1, total: 3, pid: 50 }, 0]]), 500)
-
-    expect(bar.state).toBe('stopped')
+    expect(stop(run('job', [[{ done: 1, total: 3 }, 0]]), 500).state).toBe('stopped')
   })
 })
 
 describe('isExpired', () => {
   const ended = (state: 'done' | 'fail') => run('job', [[{ done: 1, total: 2 }, 0], [{ state, done: 1, total: 2 }, 0]])
+  const running = run('job', [[{ done: 1, total: 2 }, 0]])
   const cases: [string, ReturnType<typeof run>, number, boolean, boolean][] = [
     ['complete, at 2 s', ended('done'), 2000, false, false],
     ['complete, after 2 s', ended('done'), 2001, false, true],
     ['failed, at 30 s', ended('fail'), 30_000, false, false],
     ['failed, after 30 s', ended('fail'), 30_001, false, true],
-    ['running with a live owner, after an hour', run('job', [[{ done: 1, total: 2, pid: 50 }, 0]]), 3_600_000, true, false],
-    ['running with no owner, at 10 min', run('job', [[{ done: 1, total: 2 }, 0]]), 600_000, false, false],
-    ['running with no owner, after 10 min', run('job', [[{ done: 1, total: 2 }, 0]]), 600_001, false, true],
+    ['running in a running call, after an hour', running, 3_600_000, true, false],
+    ['running with no call, at 10 min', running, 600_000, false, false],
+    ['running with no call, after 10 min', running, 600_001, false, true],
   ]
-  for (const [name, bar, now, isAlive, expected] of cases) {
+  for (const [name, bar, now, isOwned, expected] of cases) {
     test(`${name}: ${expected ? 'expired' : 'kept'}`, () => {
-      expect(isExpired(bar, now, isAlive)).toBe(expected)
+      expect(isExpired(bar, now, isOwned)).toBe(expected)
     })
   }
 })

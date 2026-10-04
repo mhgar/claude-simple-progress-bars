@@ -1,12 +1,9 @@
 # Simple Progress Bars
 
-Progress bars with time estimates for the long scripts that Claude Code runs. A script reports its progress with one command, and the bar shows under the prompt:
+Progress bars with time estimates for the long scripts that Claude Code runs. A script reports its progress with one command, and the bars show under the status line of Claude Code: the animated line while Claude works, and the line that closes the turn after it.
 
 ```
-❯ convert the videos in ~/clips to h265
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ⏵⏵ auto mode on · 1 shell · ↓ to manage
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+✻ Sautéed for 24s · done 9:07 pm
   convert-vid… ━━━━──────────────── 18/90  20%  0:19  ~1:12 left │ download-ub… ━━━━━━╸───────── 819M/2.0G  40%  0:19  ~0:27 left
   train-model ━━━━━━━━━━━━╸──────── 30/50  60%  0:19  ~0:12 left │ flaky-script ━━━━━━━━━───────────── 40/100  40%  0:18  stopped
   upload-to-n… server retu… ━━━━╸────── 25/60  41%  0:18  failed │ scan-library Scanning li… ──━━━━━━───────────────── 1234  0:19
@@ -19,13 +16,13 @@ Each update costs zero tokens. Claude learns about the command from a short sect
 ## Install
 
 ```
-claude plugin marketplace add mhgar/simple-progress-bars
+claude plugin marketplace add mhgar/claude-simple-progress-bars
 claude plugin install simple-progress-bars@simple-progress-bars
 ```
 
 Then start a new Claude Code session. The plugin puts the `claude-progress` command on the `PATH` of Claude's Bash tool.
 
-**Requirements:** Claude Code with function hooks, Python 3.8 or later, and Linux or macOS. Windows is not supported.
+**Requirements:** Claude Code with function hooks, on Linux, macOS, or Windows. The command is a bash script, so it needs no other runtime. On Windows it runs in Git Bash, which Claude Code uses for its Bash tool.
 
 ## Usage
 
@@ -36,13 +33,11 @@ Claude writes these calls for you. You can also use them in your own scripts. Op
 | `claude-progress -n NAME 17/240 [detail]` | 17 of 240 done |
 | `claude-progress -n NAME 1.5G/4G` | Sizes. The bar shows `1.5G/4.0G` and a rate |
 | `claude-progress -n NAME 42% [detail]` | Percent done |
-| `claude-progress -n NAME Scanning disk` | Text with no number. The count and the total stay. With no total, a segment moves back and forth |
-| `claude-progress -n NAME -t 500`, then `claude-progress -n NAME +1` | A total, then counts from parallel workers. A file lock keeps the count correct |
+| `claude-progress -n NAME Scanning disk` | Text with no number. The count and the total stay |
+| `claude-progress -n NAME -t 500`, then `claude-progress -n NAME +1` | A total, then counts from parallel workers |
 | `claude-progress -n NAME done [msg]` | The task is complete |
 | `claude-progress -n NAME fail [msg]` | The task failed. The bar turns red |
 | `claude-progress -n NAME clear` | Remove the bar now |
-| `cmd \| claude-progress -n NAME -l -t 5000` | Count lines of output, like `pv -l`. `-b` counts bytes |
-| `claude-progress -n NAME -p -- python train.py` | Read `tqdm`, `pv`, or `rsync` output from the command, and report its exit status |
 
 Example:
 
@@ -55,50 +50,31 @@ done
 claude-progress -n convert done
 ```
 
-Run `claude-progress --help` for the full reference. If you leave out `-n`, the task name is the name of the calling script.
+The command never fails a script: it always exits 0, and outside a Claude Code session it reports nothing. A call takes about 2 ms. Run `claude-progress --help` for the full reference.
 
-**Scripts that run outside Claude Code.** Outside a Claude Code session, `claude-progress` reports nothing, but other machines do not have the command at all. Claude puts these lines near the top of a bash script file that people can run elsewhere. Then the calls do nothing there, pipe modes pass the input through, and `-- COMMAND` runs the command:
+**Scripts that run outside Claude Code.** Other machines do not have the command. Claude puts this line near the top of a script file that people can run elsewhere, so the calls do nothing there:
 
 ```bash
-# Lets a bash script run where claude-progress is not installed: direct reports
-# do nothing, pipe modes pass their input through, and "-- COMMAND" runs COMMAND.
-command -v claude-progress >/dev/null || claude-progress() {
-  local pipe=
-  while [ $# -gt 0 ]; do
-    case $1 in
-      -n | --name | -t | --total) shift; [ $# -gt 0 ] && shift ;;
-      -l | --lines | -b | --bytes | -p | --parse) pipe=1; shift ;;
-      --) shift; "$@"; return ;;
-      *) [ -z "$pipe" ] && return 0; shift ;; # VALUE ends a direct report. In a pipe mode, detail text.
-    esac
-  done
-  if [ -n "$pipe" ]; then cat; fi
-}
+command -v claude-progress >/dev/null || claude-progress() { :; }
 ```
 
 ## What the bar shows
 
 - **Task name:** In bold. A name longer than 20 cells, or one fifth of the line, is cut with `…`. Wide characters count as two cells.
-- **Time estimate:** A smoothed rate (exponential moving average, smoothing 0.3, the `tqdm` default). The rate counts only updates that change the count. The bar shows `estimating…` until it has 3 counted updates and 2 seconds of data. The shown value moves only when the new estimate differs by more than 10%.
-- **At the total:** A bar that reaches its total while the script runs shows `finishing…`. It shows `done` when the script reports done or exits.
-- **Layout:** Each task gets at least 50 columns. Tasks that do not fit on one line go to the next line. The rows are balanced, up to the row limit, then `+N`.
-- **Colors:** Cyan while a task runs. Yellow "no update" after 30 seconds with no update. Green when done. Red when failed or stopped.
+- **Time estimate:** A smoothed rate (exponential moving average, weight 0.3 for the newest sample). Only updates that change the count make a rate sample. The bar shows `estimating…` until it has 3 counted updates and 2 seconds of data. The shown value moves only when a new estimate differs by more than 10%.
+- **At the total:** A bar that reaches its total while its script runs shows `finishing…`.
+- **Layout:** Each task gets at least 50 columns. Tasks that do not fit on a row go to the next row. The rows are balanced, up to the row limit, then `+N`.
+- **Colors:** Cyan while a task runs. Yellow `no update` after 30 seconds with no update. Green when done. Red when failed or stopped.
 
-## Failure handling
+## How a bar ends
 
 | Case | Result |
 | --- | --- |
-| The script crashes or is killed before `done` | The plugin sees that the reporting process exited. The bar shows "stopped" for 30 seconds. A bar at its total shows "done". |
-| A command run with `-p --` exits with a non-zero status | The bar shows "failed" with `exit N`. `claude-progress` exits with the same status. |
-| A command run with `-p --` dies by a signal | The bar shows "failed" with `signal N`. `claude-progress` dies by the same signal, so the shell sees it. Ctrl-C reaches the command, and SIGTERM and SIGHUP pass on to it. |
-| The command cannot start | Exit 127 for a missing command, 126 for one that cannot run, as in a shell. |
-| The reader of a pipe closes early (`\| head`) | `claude-progress` ends by SIGPIPE, as `cat` does. With `--`, the command gets SIGPIPE on its next write. |
-| A background process keeps the output pipes open | `claude-progress` waits 1 second after the command exits, then ends. |
-| No update for 30 seconds while the process runs | The bar turns yellow and stays. |
-| Bad input, or the plugin is not loaded | A warning on stderr. Direct reports exit 0, pipe modes still pass the input through, and `--` still runs the command. |
-| Outside Claude Code | `claude-progress` reports nothing. See the shim above for machines that do not have it. |
-| The total changes, or the count goes back | The rate estimate starts again. |
-| `/clear` or `/resume` | The plugin follows the new session ID, and keeps the bars of background tasks that started before. |
+| The script reports `done` | Green `done` for 2 seconds, then the bar goes. |
+| The script reports `fail` | Red `failed` with the message, for 30 seconds. |
+| The foreground Bash call that ran the script ends first | `done` when the count reached the total, else red `stopped` for 30 seconds. A later update resumes the bar. |
+| A background script stops reporting | Yellow `no update` after 30 seconds. The bar goes 10 minutes after its last update. |
+| The script reports a new run after `done` or `fail` | A new bar, with a new start time. |
 
 ## Settings
 
@@ -106,24 +82,23 @@ Run `/plugin configure simple-progress-bars@simple-progress-bars`, or use the co
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `position` | `below` | `below`: under the mode line. `above`: in the band above the prompt, over what other plugins draw there. Claude Code keeps an empty notification row between that band and the prompt. |
 | `maxRows` | `3` | Most rows of bars |
 | `minSeconds` | `30` | Claude adds progress reports only to scripts it expects to run at least this long |
 
 ## How it works
 
-1. `claude-progress` writes one small JSON file per task to `<dir>/<session id>/<task name>`. `<dir>` is `$PROGRESS_DIR`, else `$XDG_RUNTIME_DIR/claude-progress`, else `$TMPDIR/claude-progress`, else `/tmp/claude-progress-<uid>`. The session ID comes from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in every Bash call. Each write goes to a temporary file first, then a rename replaces the task file.
-2. The plugin asks `claude-progress --dir` for `<dir>` once at session start, so the two parts always agree.
-3. The plugin reads the session directory 4 times a second, and reads a file again only when it changes.
-4. The plugin checks whether each reporting process still runs: through `/proc` on Linux, through one `ps` call on macOS.
+1. Each call of `claude-progress` writes one line to `<config>/progress/<session id>/<task name>`. `<config>` is `$CLAUDE_CONFIG_DIR`, or `~/.claude`. The session ID comes from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in every Bash call.
+2. A new count or percent replaces the file. Every other report appends a line, so parallel workers need no lock.
+3. The plugin reads the session directory 4 times a second. It reads a file again only when the file changes, and it folds the lines in order into the state of the task.
+4. The plugin watches its foreground Bash calls. When a call ends, the bars that only that call can own end too.
 
-**What the plugin touches:** It reads and writes only `<dir>`. At session start, it deletes subdirectories of `<dir>` that are named like a session ID and are older than 24 hours. At session end, it deletes the directories of that process. It runs `mkdir`, `rm`, `find`, and `ps` for this work, and it does not use the network.
+**What it touches:** The command writes only in `<config>/progress`. When a session writes its first task, the command deletes the session directories there that are older than 24 hours. The plugin only reads, and it runs no processes. Neither part uses the network.
 
 ## Limits
 
-- **Sandboxed Bash:** If the Bash tool runs in a sandbox with its own `TMPDIR` or its own PID namespace, the bars can fail to show, or a crashed script can keep its bar. On Linux, `XDG_RUNTIME_DIR` usually avoids the first problem.
-- **Buffered output:** `-p --` sets `PYTHONUNBUFFERED=1` for the command. Other programs can buffer their output when it goes to a pipe. On Linux, use `stdbuf -oL COMMAND`.
-- **Parse mode guesses:** `-p` takes the newest `N%` or `N/M` in the output. A percent wins over a count on the same line. The first stream and kind that it finds stay its source. Output with other numbers in that form can move the bar.
+- **Parallel Bash calls:** A bar ends only when no running foreground call can own it. A bar in two overlapping calls ends when the second call ends.
+- **Background scripts:** No Bash call owns them, so a crash shows as `no update`, not `stopped`.
+- **`cmd` and PowerShell:** The command is a bash script. On Windows, call it from Git Bash.
 
 ## Similar projects
 
@@ -135,10 +110,13 @@ Run `/plugin configure simple-progress-bars@simple-progress-bars`, or use the co
 
 ## Development
 
+The behavior of each part is specified in [`openspec/specs`](openspec/specs), the source of truth for what the code does.
+
 ```
 claude plugin validate plugins/simple-progress-bars     # manifest and hooks
 cd plugins/simple-progress-bars && claude plugin test . # parse, bar, layout, watch, and prompt tests
 plugins/simple-progress-bars/tests/cli-test.sh          # tests for the claude-progress command
+npx @fission-ai/openspec validate --specs --strict      # the specs
 ```
 
 To try the plugin without an install, run `claude --plugin-dir plugins/simple-progress-bars`. Then run `! examples/demo.sh` in the session. It starts six fake tasks that show each kind of bar.

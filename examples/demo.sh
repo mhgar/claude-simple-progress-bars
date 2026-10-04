@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Six fake tasks that show each kind of bar, for about 45 seconds.
+# From your own shell, no Bash call owns the tasks. So no bar shows "stopped".
 # Run it in a Claude Code session with the plugin enabled: ! examples/demo.sh
 set -u
 if ! command -v claude-progress >/dev/null; then
@@ -38,22 +39,25 @@ thumbnails() {
   claude-progress -n thumbnails "done"
 }
 
-# tqdm-style output, read with -p. The command exits 0.
-train() {
-  claude-progress -n train-model -p -- python3 -c '
-import sys, time
-for i in range(1, 51):
-    bar = "#" * (i // 5)
-    sys.stderr.write("\r%3d%%|%-10s| %d/50 [00:%02d<00:%02d, 1.2it/s]" % (i * 2, bar, i, i, 50 - i))
-    sys.stderr.flush()
-    time.sleep(0.6)
-' 2>/dev/null
+# Text first, with no total, then a count.
+scan() {
+  local i
+  claude-progress -n scan-library Scanning library
+  sleep 12
+  for ((i = 1; i <= 300; i++)); do
+    if ((i % 10 == 0)); then claude-progress -n scan-library "$i/300"; fi
+    sleep 0.1
+  done
+  claude-progress -n scan-library "done"
 }
 
-# A script that is killed at 40 of 100: the bar shows "stopped".
-flaky() {
-  # shellcheck disable=SC2016  # the inner shell expands these
-  bash -c 'for i in $(seq 100); do claude-progress -n flaky-script "$i/100"; sleep 0.3; [ "$i" = 40 ] && kill -9 $$; done'
+# A script that stops at 40 of 100 with no report: the bar shows "no update" after 30 s.
+stalled() {
+  local i
+  for ((i = 1; i <= 40; i++)); do
+    claude-progress -n stalled-script "$i/100"
+    sleep 0.3
+  done
 }
 
 # A task that fails with a message.
@@ -66,5 +70,5 @@ upload() {
   claude-progress -n upload-to-nas fail "server returned 503"
 }
 
-convert & download & thumbnails & train & flaky & upload &
+convert & download & thumbnails & scan & stalled & upload &
 wait
