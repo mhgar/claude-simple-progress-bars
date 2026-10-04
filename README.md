@@ -94,20 +94,6 @@ Run `/plugin configure simple-progress-bars@simple-progress-bars`, or use the co
 
 **What it touches:** The command writes only in `<config>/progress`. When a session writes its first task, the command deletes the session directories there that are older than 24 hours. The plugin only reads, and it runs no processes. Neither part uses the network.
 
-## Limits
-
-- **Parallel Bash calls:** A bar ends only when no running foreground call can own it. A bar in two overlapping calls ends when the second call ends.
-- **Background scripts:** No Bash call owns them, so a crash shows as `no update`, not `stopped`.
-- **`cmd` and PowerShell:** The command is a bash script. On Windows, call it from Git Bash.
-
-## Similar projects
-
-| Project | Difference |
-| --- | --- |
-| [agent-progress](https://github.com/csinva/agent-progress) | Shows bars in the status line. Claude writes a monitor script and estimates the ETA with an LLM call, so it costs tokens. |
-| [ccprogress](https://github.com/amigoer/ccprogress) | Tracks the steps of Claude's own plan, not scripts. |
-| [claude-code-eta](https://github.com/meyer-coder/claude-code-eta) | Estimates how long prompts and agents take. |
-
 ## Development
 
 The behavior of each part is specified in [`openspec/specs`](openspec/specs), the source of truth for what the code does.
