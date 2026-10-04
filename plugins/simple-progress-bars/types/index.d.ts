@@ -40,6 +40,6 @@ export type Board = { bars: Bar[]; now: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'simple-progress-bars': { board: Board; isWorking: boolean }
+    'simple-progress-bars': { board: Board }
   }
 }

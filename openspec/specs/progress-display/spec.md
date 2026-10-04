@@ -1,16 +1,16 @@
 # Progress Display Specification
 
 ## Purpose
-The plugin draws one progress bar for each task in the Claude Code terminal, under its status line. It covers where the bars go, how they fit the width, and the text and colors of each bar.
+The plugin draws one progress bar for each task in the Claude Code terminal, in the band above the prompt. It covers where the bars go, how they fit the width, and the text and colors of each bar.
 
 ## Requirements
 
 ### Requirement: Position
-While a turn runs, the rows of bars MUST go under the animated status line. After a turn, they MUST go under the line that closes the newest turn, and under no older one. The rows MUST have an indent of 2 cells, no rules, and MUST leave the last cell of the terminal free.
+The rows of bars MUST go in the band above the prompt, while a turn runs and after it, and MUST never go into the transcript. The plugin MUST give the band to a survey that holds it. The rows MUST have an indent of 2 cells, no rules, and MUST leave the last cell of the band free.
 
-#### Scenario: Two finished turns
-- **WHEN** two turns have ended and a task runs
-- **THEN** only the line of the newer turn has the bars under it
+#### Scenario: An interrupted turn
+- **WHEN** a turn is interrupted while a task runs
+- **THEN** the bars stay above the prompt, and no line in the transcript has bars under it
 
 ### Requirement: Rows
 Each bar MUST get at least 50 cells. The plugin MUST fit as many bars on a row as it can, with ` │ ` between them, balance them across rows, and show at most `maxRows` rows (default 3, from 1 to 6). The last row MUST end with `  +N` for the bars that do not fit. Bars MUST be in the order of their start times.

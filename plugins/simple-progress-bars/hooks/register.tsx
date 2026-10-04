@@ -9,16 +9,15 @@ import { ingest, isTaskName, needsRead, settle } from './watch'
 import type { Call, TaskFile } from './watch'
 
 const board = atom({ plugin: 'simple-progress-bars', key: 'board' } as const, { bars: [], now: 0 } as Board)
-const working = atom({ plugin: 'simple-progress-bars', key: 'isWorking' } as const, false)
 
 // 4 reads a second: the bar moves smoothly, and a read lists one small directory.
 const TICK_MS = 250
 const ID_CHECK_TICKS = 4 // once a second: /clear and /resume change the session id
 const CALL_KEEP_MS = 60_000 // An ended call matters only to the next few reads.
-const INDENT = 2 // cells: under the text of the status line, after its glyph
+const INDENT = 2 // cells: in line with the text of the prompt, after its glyph
 
-// One cell stays free at the right edge: a row as wide as the terminal gets cut with `…`.
-const barWidth = (columns: number | undefined) => Math.max(20, (columns ?? 80) - INDENT - 1)
+// One cell stays free at the right edge: a row as wide as the band gets cut with `…`.
+const barWidth = (columns: number) => Math.max(20, columns - INDENT - 1)
 
 /** What one load of the module watches. `register` makes it, and every step takes it. */
 type Watch = {
@@ -34,9 +33,6 @@ type Watch = {
   ticks: number
   /** The text of shim.sh for the prompt, or null when its read failed. */
   shim: string | null
-  /** The turn lines drawn so far, and the newest of them: the bars go under it. */
-  turns: Set<string>
-  newestTurn: string | null
 }
 
 /** Lists one session directory. Reads only the files that changed, and skips hidden ones. */
@@ -98,7 +94,7 @@ export const register: Register = (on, options) => {
   const maxRows = typeof options.maxRows === 'number' ? Math.max(1, Math.round(options.maxRows)) : 3
   const minSeconds = typeof options.minSeconds === 'number' ? Math.max(1, options.minSeconds) : 30
   const w: Watch = {
-    base: null, dirs: [], calls: [], hidden: new Map(), isBusy: false, ticks: 0, shim: null, turns: new Set(), newestTurn: null,
+    base: null, dirs: [], calls: [], hidden: new Map(), isBusy: false, ticks: 0, shim: null,
   }
 
   on('session.start', async ($, e, next) => {
@@ -125,54 +121,15 @@ export const register: Register = (on, options) => {
     return { sections: [...result.sections, section] }
   })
 
-  on('turn.start', async ($, e, next) => {
-    await update($, working, () => true)
-    return next(e)
-  })
-
-  on('turn.complete', async ($, e, next) => {
-    const result = await next(e)
-    await update($, working, () => false)
-    return result
-  })
-
-  // While Claude works: under the animated status line.
-  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    const line = await next(e)
+  // Above the prompt, in its band, and never in the transcript: the same while Claude works and after.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const { bars, now } = await read($, board)
-    if (bars.length === 0) return line
+    if (bars.length === 0 || e.props.hasSurvey) return next(e)
 
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
-        {line}
-        {rows(bars, barWidth(e.viewport?.columns), now, maxRows).map((row, r) => (
-          <Box key={`row${r}`} flexDirection="row" paddingLeft={INDENT}>
-            {row.map((p, i) => (
-              <Text key={String(i)} color={p.color} dimColor={p.dim} bold={p.bold} wrap="truncate">{p.text}</Text>
-            ))}
-          </Box>
-        ))}
-      </Box>
-    )
-  })
-
-  // After a turn: under the line that closes the newest turn, and only while no turn runs.
-  on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => {
-    const line = await next(e)
-    if (!w.turns.has(e.requestId)) {
-      w.turns.add(e.requestId)
-      w.newestTurn = e.requestId // A turn line draws for the first time when its turn ends.
-    }
-    const { bars, now } = await read($, board)
-    const isWorking = await read($, working)
-    if (bars.length === 0 || isWorking || e.requestId !== w.newestTurn) return line
-
-    const { Box, Text } = $.ui.resolve(e)
-    return (
-      <Box flexDirection="column">
-        {line}
-        {rows(bars, barWidth(e.viewport?.columns), now, maxRows).map((row, r) => (
+        {rows(bars, barWidth(e.props.bodyColumns), now, Math.min(maxRows, e.props.maxRows)).map((row, r) => (
           <Box key={`row${r}`} flexDirection="row" paddingLeft={INDENT}>
             {row.map((p, i) => (
               <Text key={String(i)} color={p.color} dimColor={p.dim} bold={p.bold} wrap="truncate">{p.text}</Text>

@@ -1,12 +1,13 @@
 # Simple Progress Bars
 
-Progress bars with time estimates for the long scripts that Claude Code runs. A script reports its progress with one command, and the bars show under the status line of Claude Code: the animated line while Claude works, and the line that closes the turn after it.
+Progress bars with time estimates for the long scripts that Claude Code runs. A script reports its progress with one command, and the bars show in the band above the prompt of Claude Code, while Claude works and after. They never go into the transcript.
 
 ```
-✻ Sautéed for 24s · done 9:07 pm
   convert-videos clip_018.mkv ━━━─────────── 18/90  20%  0:19  ~1:12 left │ download-ubun… ━━━━━━╸───────── 819M/2.0G  40%  46M/s  0:19  ~0:27 left
   train-model ━━━━━━━━━━━━━━━━━━──────────── 30/50  60%  0:19  ~0:12 left │ flaky-script ━━━━━━━━━━━━╸────────────────── 40/100  40%  0:18  stopped
   upload-to-nas server return… ━━━━━━━────────── 25/60  41%  0:18  failed │ scan-library Scanning libr… ──━━━━━━──────────────────────── 1234  0:19
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
 ```
 
 Each update costs zero tokens. Claude learns about the command from a short section that the plugin adds to its system prompt. Claude uses it only for scripts that run longer than about 30 seconds and have countable work.
@@ -101,8 +102,7 @@ Run `/plugin configure simple-progress-bars@simple-progress-bars`, or use the co
 | --- | --- |
 | `prompt.compose` | Adds one section, `simple-progress-bars:usage`, at the end of Claude's system prompt. It tells Claude when and how to call `claude-progress`. No other part of the prompt changes. |
 | `tool.call` (Bash) | Notes when each foreground Bash call starts and ends. The command, its input, and its result do not change. |
-| `turn.start`, `turn.complete` | Note whether a turn runs, so the bars go under the right status line. Nothing changes. |
-| `ui.render` (`Spinner`, `TurnDuration`) | Draws the bars under the status line. The status line itself stays as Claude Code draws it. |
+| `ui.render` (`AbovePrompt`) | Draws the bars in the band above the prompt. The transcript and the status line stay as Claude Code draws them. |
 | `session.start` | Reads `CLAUDE_CONFIG_DIR`, `HOME`, and `USERPROFILE` only to find the progress directory, and reads the plugin's own `shim.sh`. No value leaves the machine. |
 
 ## Development
