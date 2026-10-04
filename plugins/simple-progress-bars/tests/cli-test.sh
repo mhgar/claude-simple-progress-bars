@@ -11,15 +11,15 @@ export CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=test-session
 BASE="$CLAUDE_CONFIG_DIR/progress"
 D="$BASE/$CLAUDE_CODE_SESSION_ID"
 case $(uname -s) in MINGW* | MSYS* | CYGWIN*) IS_WINDOWS=1 ;; *) IS_WINDOWS= ;; esac
-pass=0
-fail=0
+passed=0
+failed=0
 
 # check NAME EXPECTED ACTUAL
 check() {
   if [ "$2" = "$3" ]; then
-    pass=$((pass + 1))
+    passed=$((passed + 1))
   else
-    fail=$((fail + 1))
+    failed=$((failed + 1))
     echo "FAIL: $1: expected '$2', got '$3'"
   fi
 }
@@ -157,5 +157,5 @@ out=$(env -u CLAUDE_CODE_SESSION_ID PATH=/usr/bin:/bin bash -c ". \"$ROOT/shim.s
 check "the shim makes the calls do nothing" 0 "$out"
 check "the README gives the same shim" yes "$(grep -qF -- "$(grep -v '^#' "$ROOT/shim.sh")" "$ROOT/../../README.md" && echo yes || echo no)"
 
-echo "$pass passed, $fail failed"
-[ "$fail" -eq 0 ]
+echo "$passed passed, $failed failed"
+[ "$failed" -eq 0 ]
