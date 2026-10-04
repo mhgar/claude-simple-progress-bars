@@ -95,7 +95,8 @@ if [ -z "$IS_WINDOWS" ]; then
   mkdir -p "$BASE/ro-session" && chmod 500 "$BASE/ro-session"
   out=$(CLAUDE_CODE_SESSION_ID=ro-session "$P" -n x 1/2 2>&1)
   check "a write that fails exits 0" 0 "$?"
-  check "a write that fails warns" yes "$(case $out in 'claude-progress: cannot write'*) echo yes ;; *) echo no ;; esac)"
+  # bash 3.2 (macOS) cannot parse a case pattern inside $( ), so this check uses [[ ]].
+  check "a write that fails warns" yes "$([[ $out == 'claude-progress: cannot write'* ]] && echo yes || echo no)"
   chmod 700 "$BASE/ro-session"
   check "the session directory is private" 700 "$(stat -c %a "$D" 2>/dev/null || stat -f %Lp "$D")"
 fi
