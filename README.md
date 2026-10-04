@@ -4,9 +4,9 @@ Progress bars with time estimates for the long scripts that Claude Code runs. A 
 
 ```
 ✻ Sautéed for 24s · done 9:07 pm
-  convert-vid… ━━━━──────────────── 18/90  20%  0:19  ~1:12 left │ download-ub… ━━━━━━╸───────── 819M/2.0G  40%  0:19  ~0:27 left
-  train-model ━━━━━━━━━━━━╸──────── 30/50  60%  0:19  ~0:12 left │ flaky-script ━━━━━━━━━───────────── 40/100  40%  0:18  stopped
-  upload-to-n… server retu… ━━━━╸────── 25/60  41%  0:18  failed │ scan-library Scanning li… ──━━━━━━───────────────── 1234  0:19
+  convert-videos clip_018.mkv ━━━─────────── 18/90  20%  0:19  ~1:12 left │ download-ubun… ━━━━━━╸───────── 819M/2.0G  40%  46M/s  0:19  ~0:27 left
+  train-model ━━━━━━━━━━━━━━━━━━──────────── 30/50  60%  0:19  ~0:12 left │ flaky-script ━━━━━━━━━━━━╸────────────────── 40/100  40%  0:18  stopped
+  upload-to-nas server return… ━━━━━━━────────── 25/60  41%  0:18  failed │ scan-library Scanning libr… ──━━━━━━──────────────────────── 1234  0:19
 ```
 
 Each update costs zero tokens. Claude learns about the command from a short section that the plugin adds to its system prompt. Claude uses it only for scripts that run longer than about 30 seconds and have countable work.
@@ -62,6 +62,7 @@ command -v claude-progress >/dev/null || claude-progress() { :; }
 
 - **Task name:** In bold. A name longer than 20 cells, or one fifth of the line, is cut with `…`. Wide characters count as two cells.
 - **Time estimate:** A smoothed rate (exponential moving average, weight 0.3 for the newest sample). Only updates that change the count make a rate sample. The bar shows `estimating…` until it has 3 counted updates and 2 seconds of data. The shown value moves only when a new estimate differs by more than 10%.
+- **Transfer rate:** A task in bytes, such as `claude-progress -n download 819M/2G`, also shows its rate, such as `46M/s`. On a narrow row, the rate is the second part to go.
 - **At the total:** A bar that reaches its total while its script runs shows `finishing…`.
 - **Layout:** Each task gets at least 50 columns. Tasks that do not fit on a row go to the next row. The rows are balanced, up to the row limit, then `+N`.
 - **Colors:** Cyan while a task runs. Yellow `no update` after 30 seconds with no update. Green when done. Red when failed or stopped.
