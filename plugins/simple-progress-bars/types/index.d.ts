@@ -1,36 +1,44 @@
-/** run: in progress. stopped: the reporting process exited before done. */
+/**
+ * run: in progress. complete: done. fail: the script reported a failure.
+ * stopped: the reporting process exited before the task was done.
+ */
 export type BarState = 'run' | 'complete' | 'fail' | 'stopped'
 
 /** '' for a count, 'B' for bytes, '%' for percent. */
 export type BarUnit = '' | 'B' | '%'
 
+/** One task as the plugin shows it. All times are ms since the epoch. */
 export type Bar = {
-  /** File name in the progress directory: the task name. */
+  /** The task file's path: unique across the watched session directories. */
+  key: string
+  /** The task name: the file name. */
   name: string
   /** Detail text, or the failure message. */
   label: string
   done: number
-  /** null when the script gave no total (indeterminate bar). */
+  /** null when the script gave no total (an indeterminate bar). */
   total: number | null
   unit: BarUnit
   state: BarState
-  /** Process that reports progress, or null for a plain text file. */
+  /** The process that reports progress, or null when the file names none. */
   pid: number | null
-  /** First time the mod saw the file, in ms since the epoch. */
+  /** The first update of this run. */
   startedAt: number
-  /** Modification time of the last update, in ms since the epoch. */
+  /** The file's modification time at the last update. */
   updatedAt: number
-  /** Time of the last change of state, in ms since the epoch. */
+  /** The last update that changed the count. The rate and the estimate count from it. */
+  progressAt: number
+  /** When the bar left the run state, or null while it runs. */
   endedAt: number | null
-  /** Number of updates with progress. */
+  /** The number of updates that changed the count in this run. */
   samples: number
-  /** Smoothed rate in units per ms, or null before two updates. */
+  /** The smoothed rate in units per ms, or null before two counted updates. */
   rate: number | null
-  /** Shown time left at updatedAt in ms, or null while estimating. */
+  /** The shown time left at progressAt, in ms, or null while estimating. */
   eta: number | null
 }
 
-export type Board = { dir: string | null; bars: Bar[]; now: number }
+export type Board = { bars: Bar[]; now: number }
 
 declare module 'claude-code' {
   interface PluginState {

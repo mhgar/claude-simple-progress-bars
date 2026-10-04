@@ -1,144 +1,171 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, ProcessRunResult, Register, Timer } from 'claude-code'
 
 import type { Bar, Board } from '../types'
-import { apply, isExpired, parse, promptSection, rows, stop } from './progress'
+import { rows } from './layout'
+import { parse } from './parse'
+import { promptSection } from './prompt'
+import { ingest, isTaskName, needsRead, settle, watchedPids } from './watch'
+import type { TaskFile } from './watch'
 
-const board = atom(
-  { plugin: 'simple-progress-bars', key: 'board' } as const,
-  { dir: null, bars: [], now: 0 } as Board,
-)
+const board = atom({ plugin: 'simple-progress-bars', key: 'board' } as const, { bars: [], now: 0 } as Board)
 
+// 4 reads a second: the bar moves smoothly, and a read lists one small directory.
 const TICK_MS = 250
-const ID_CHECK_TICKS = 4 // Check the session id every second, because /clear changes it.
+const ID_CHECK_TICKS = 4 // once a second: /clear and /resume change the session id
 const OLD_DIR_MINUTES = 24 * 60
-const INDENT = '  ' // matches the hint line's own indent
+const INDENT = '  ' // the hint line's own indent
+// Only directories named like a session id are swept, whatever PROGRESS_DIR names.
+const SESSION_DIR_GLOB = '????????-????-????-????-????????????'
+// The process goes on after these ends, under a new session id.
+const CONTINUES = new Set(['clear', 'resume'])
 
-// The module's own variables start over on each reload. session.start fires again then.
-let base: string | null = null
-let dir: string | null = null
-let hasProc = true // Linux has /proc. macOS does not, so it uses ps.
-let isBusy = false
-let ticks = 0
+/** What one load of the module watches. `register` makes it, and every step takes it. */
+type Watch = {
+  base: string | null
+  /** The session directories of this process, newest last. Older ones keep their background tasks. */
+  dirs: string[]
+  hasProc: boolean
+  isBusy: boolean
+  ticks: number
+  timer: Timer | null
+  logged: Set<string>
+}
 
-const isTaskFile = (name: string) => !name.endsWith('.lock') && !name.endsWith('.tmp')
+/** Writes a failure to the debug log, once per kind of failure. */
+function log($: EngineInterface, w: Watch, what: string, error: unknown) {
+  if (w.logged.has(what)) return
+  w.logged.add(what)
+  $.ui.log(`simple-progress-bars: ${what}: ${String(error)}`, { to: 'debug' })
+}
 
-/** Returns the pids in `pids` that still run. */
-async function alive($: EngineInterface, pids: readonly number[]): Promise<Set<number>> {
+async function run($: EngineInterface, w: Watch, what: string, argv: string[]): Promise<ProcessRunResult | null> {
+  try {
+    const result = await $.process.run(argv)
+    if (result.exitCode !== 0) log($, w, what, result.stderr.trim() || `exit ${result.exitCode}`)
+    return result
+  } catch (error) {
+    log($, w, what, error)
+    return null
+  }
+}
+
+/** Returns the pids that still run: through /proc on Linux, through one ps call on macOS. */
+async function alive($: EngineInterface, w: Watch, pids: readonly number[]): Promise<Set<number>> {
   if (pids.length === 0) return new Set()
-  if (hasProc) {
+  if (w.hasProc) {
     const found = await Promise.all(pids.map(p => $.fs.exists(`/proc/${p}`).catch(() => true)))
     return new Set(pids.filter((_, i) => found[i]))
   }
-  const ps = await $.process.run(['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => null)
-  if (ps === null) return new Set(pids) // If ps fails, mark nothing as stopped.
+  const ps = await run($, w, 'ps', ['ps', '-o', 'pid=', '-p', pids.join(',')])
+  // ps exits 1 when no pid runs. With no output at all, it failed: mark nothing as stopped.
+  if (ps === null || (ps.exitCode !== 0 && ps.stderr.trim() !== '')) return new Set(pids)
   return new Set(ps.stdout.split('\n').map(s => Number(s.trim())).filter(n => n > 0))
 }
 
-async function tick($: EngineInterface) {
-  if (dir === null || base === null || isBusy) return
-  isBusy = true
+/** Lists one session directory. Reads only the files that changed since the last read. */
+async function readDir($: EngineInterface, dir: string, byKey: ReadonlyMap<string, Bar>): Promise<TaskFile[]> {
+  const entries = await $.fs.list(dir).catch(() => [])
+  const files: TaskFile[] = []
+  for (const entry of entries) {
+    if (entry.kind !== 'file' || !isTaskName(entry.name)) continue
+    const key = `${dir}/${entry.name}`
+    const isChanged = needsRead(byKey.get(key), entry.mtimeMs)
+    const text = isChanged ? await $.fs.read(key).catch(() => '') : ''
+    files.push({ key, name: entry.name, mtimeMs: entry.mtimeMs, update: isChanged ? parse(text) : null })
+  }
+  return files
+}
+
+/** Deletes the files of expired bars. A file that changed since its last read stays: it holds a new run. */
+async function removeFiles($: EngineInterface, w: Watch, expired: readonly Bar[]) {
+  const paths: string[] = []
+  for (const bar of expired) {
+    const stat = await $.fs.stat(bar.key).catch(() => null)
+    if (stat !== null && stat.mtimeMs === bar.updatedAt) paths.push(bar.key, `${bar.key}.lock`)
+  }
+  if (paths.length > 0) await run($, w, 'rm', ['rm', '-f', '--', ...paths])
+}
+
+async function followSessionId($: EngineInterface, w: Watch) {
+  const dir = `${w.base}/${await $.session.id()}`
+  if (w.dirs.includes(dir)) return
+  w.dirs.push(dir)
+  await run($, w, 'mkdir', ['mkdir', '-p', '-m', '700', dir])
+}
+
+async function tick($: EngineInterface, w: Watch) {
+  if (w.base === null || w.isBusy) return
+  w.isBusy = true
   try {
-    ticks += 1
-    if (ticks % ID_CHECK_TICKS === 0) {
-      const next = `${base}/${await $.session.id()}`
-      if (next !== dir) {
-        dir = next
-        await $.process.run(['mkdir', '-p', '-m', '700', dir]).catch(() => {})
-      }
-    }
+    w.ticks += 1
+    if (w.ticks % ID_CHECK_TICKS === 0) await followSessionId($, w)
 
     const now = await $.clock.now()
     const prev = await read($, board)
-    const entries = await $.fs.list(dir).catch(() => [])
-    const byName = new Map(prev.dir === dir ? prev.bars.map(b => [b.name, b]) : [])
-    let bars: Bar[] = []
+    const byKey = new Map(prev.bars.map(b => [b.key, b]))
+    const files = (await Promise.all(w.dirs.map(d => readDir($, d, byKey)))).flat()
 
-    for (const entry of entries) {
-      if (entry.kind !== 'file' || !isTaskFile(entry.name)) continue
-      let bar = byName.get(entry.name)
-      byName.delete(entry.name)
-      if (bar === undefined || entry.mtimeMs > bar.updatedAt) {
-        const text = await $.fs.read(`${dir}/${entry.name}`).catch(() => '')
-        const u = parse(text)
-        if (u !== null) bar = apply(bar, entry.name, u, entry.mtimeMs)
-      }
-      if (bar !== undefined) bars.push(bar)
-    }
+    // The files are read first, so a `done` written just before exit wins over the process check.
+    const ingested = ingest(prev.bars, files)
+    const live = await alive($, w, watchedPids(ingested))
+    const { bars, expired } = settle(ingested, live, now)
+    await removeFiles($, w, expired)
 
-    // The files are read first, so a `done` written just before exit wins over the check.
-    const pids = bars.flatMap(b => (b.state === 'run' && b.pid !== null ? [b.pid] : []))
-    const live = await alive($, [...new Set(pids)])
-    bars = bars.map(b => (b.state === 'run' && b.pid !== null && !live.has(b.pid) ? stop(b, now) : b))
-
-    const expired = bars.filter(b => isExpired(b, now, b.pid !== null && live.has(b.pid)))
-    bars = bars.filter(b => !expired.includes(b))
-    // A file that is gone keeps its row only while it shows a final state.
-    for (const bar of byName.values()) {
-      if (bar.state !== 'run' && !isExpired(bar, now, false)) bars.push(bar)
-    }
-
-    if (expired.length > 0) {
-      const paths = expired.flatMap(b => [`${dir}/${b.name}`, `${dir}/${b.name}.lock`])
-      await $.process.run(['rm', '-f', '--', ...paths]).catch(() => {})
-    }
-    bars.sort((a, b) => a.startedAt - b.startedAt)
-
-    if (bars.length > 0 || prev.bars.length > 0 || prev.dir !== dir) {
-      await update($, board, () => ({ dir, bars, now }))
-    }
+    if (bars.length > 0 || prev.bars.length > 0) await update($, board, () => ({ bars, now }))
   } finally {
-    isBusy = false
+    w.isBusy = false
   }
+}
+
+async function start($: EngineInterface, w: Watch) {
+  const dir = await run($, w, 'claude-progress --dir', [`${$.plugin.root}/bin/claude-progress`, '--dir'])
+  const base = dir?.stdout.trim() ?? ''
+  if (dir === null || dir.exitCode !== 0 || base === '') return
+  w.base = base
+  w.dirs = [`${base}/${await $.session.id()}`]
+  w.hasProc = await $.fs.exists('/proc/self').catch(() => false)
+  await run($, w, 'mkdir', ['mkdir', '-p', '-m', '700', base, ...w.dirs])
+  // Remove the directories that crashed sessions left behind.
+  await run($, w, 'sweep', ['find', base, '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-name', SESSION_DIR_GLOB,
+    '-mmin', `+${OLD_DIR_MINUTES}`, '-exec', 'rm', '-rf', '--', '{}', '+'])
+  w.timer = $.clock.every(TICK_MS, () => void tick($, w))
+}
+
+async function end($: EngineInterface, w: Watch, reason: string) {
+  if (CONTINUES.has(reason)) return // The next id check adds the new directory.
+  w.timer?.cancel()
+  w.timer = null
+  if (w.dirs.length > 0) await run($, w, 'rm', ['rm', '-rf', '--', ...w.dirs])
+  w.base = null
+  w.dirs = []
 }
 
 export const register: Register = (on, options) => {
   const position = options.position === 'above' ? 'above' : 'below'
   const maxRows = typeof options.maxRows === 'number' ? Math.max(1, Math.round(options.maxRows)) : 3
-  const minSeconds = typeof options.minSeconds === 'number' ? options.minSeconds : 30
+  const minSeconds = typeof options.minSeconds === 'number' ? Math.max(1, options.minSeconds) : 30
+  const w: Watch = { base: null, dirs: [], hasProc: true, isBusy: false, ticks: 0, timer: null, logged: new Set() }
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
-    // The same base directory that the progress command uses.
-    const env = await $.process
-      .run(['sh', '-c', 'printf "%s" "${PROGRESS_DIR:-${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/claude-progress}"'])
-      .catch(() => null)
-    base = (env?.stdout.trim() || '/tmp/claude-progress').replace(/\/\/+/g, '/').replace(/\/+$/, '')
-    dir = `${base}/${await $.session.id()}`
-    hasProc = await $.fs.exists('/proc/self').catch(() => false)
-    await $.process.run(['mkdir', '-p', '-m', '700', dir]).catch(() => {})
-    // Remove what crashed sessions left behind.
-    await $.process
-      .run(['find', base, '-mindepth', '1', '-maxdepth', '1', '-type', 'd',
-        '-mmin', `+${OLD_DIR_MINUTES}`, '-exec', 'rm', '-rf', '--', '{}', '+'])
-      .catch(() => {})
-    $.clock.every(TICK_MS, () => void tick($))
+    await start($, w)
     return result
   })
 
   on('session.end', async ($, e, next) => {
-    if (base !== null) {
-      await $.process.run(['rm', '-rf', '--', `${base}/${e.sessionId}`]).catch(() => {})
-    }
-    // After /clear the process goes on under a new id with no session.start.
-    // The timer keeps going, and the id check moves it to the new directory.
-    if (e.reason !== 'clear') dir = null
+    await end($, w, e.reason)
     return next(e)
   })
 
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
-    return {
-      sections: [
-        ...result.sections,
-        { id: 'simple-progress-bars:usage', text: promptSection(minSeconds), scope: 'session' as const },
-      ],
-    }
+    const section = { id: 'simple-progress-bars:usage', text: promptSection(minSeconds), scope: 'session' as const }
+    return { sections: [...result.sections, section] }
   })
 
   if (position === 'below') {
-    // Under the prompt, below the engine's own hint line. The engine's line and
-    // its live pills stay as they are.
+    // Under the prompt, below the engine's own hint line, which keeps its live pills.
     on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
       const hint = await next(e)
       const { bars, now } = await read($, board)
@@ -146,19 +173,15 @@ export const register: Register = (on, options) => {
 
       const { Box, Text } = $.ui.resolve(e)
       const columns = e.viewport?.columns ?? 80
-      const width = Math.max(20, columns - 2 * INDENT.length)
-
       return (
         <Box flexDirection="column">
           {hint}
           <Text dimColor wrap="truncate">{'─'.repeat(columns)}</Text>
-          {rows(bars, width, now, maxRows).map((row, r) => (
+          {rows(bars, Math.max(20, columns - 2 * INDENT.length), now, maxRows).map((row, r) => (
             <Box key={`row${r}`} flexDirection="row">
               <Text>{INDENT}</Text>
               {row.map((p, i) => (
-                <Text key={String(i)} color={p.color} dimColor={p.dim} bold={p.bold} wrap="truncate">
-                  {p.text}
-                </Text>
+                <Text key={String(i)} color={p.color} dimColor={p.dim} bold={p.bold} wrap="truncate">{p.text}</Text>
               ))}
             </Box>
           ))}
@@ -166,27 +189,25 @@ export const register: Register = (on, options) => {
       )
     })
   } else {
-    // In the band above the prompt. The engine keeps a notification row
-    // between this band and the prompt.
+    // In the band above the prompt. What other plugins draw there stays, under the bars.
     on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+      const band = await next(e)
       const { bars, now } = await read($, board)
-      if (bars.length === 0 || e.props.hasSurvey) return next(e)
+      if (bars.length === 0 || e.props.hasSurvey) return band
 
       const { Box, Text } = $.ui.resolve(e)
-      const width = e.props.bodyColumns
-
+      const columns = e.props.bodyColumns
       return (
         <Box flexDirection="column">
-          <Text dimColor wrap="truncate">{'─'.repeat(width)}</Text>
-          {rows(bars, width, now, maxRows).map((row, r) => (
+          <Text dimColor wrap="truncate">{'─'.repeat(columns)}</Text>
+          {rows(bars, columns, now, maxRows).map((row, r) => (
             <Box key={`row${r}`} flexDirection="row">
               {row.map((p, i) => (
-                <Text key={String(i)} color={p.color} dimColor={p.dim} bold={p.bold} wrap="truncate">
-                  {p.text}
-                </Text>
+                <Text key={String(i)} color={p.color} dimColor={p.dim} bold={p.bold} wrap="truncate">{p.text}</Text>
               ))}
             </Box>
           ))}
+          {band}
         </Box>
       )
     })

@@ -1,24 +1,70 @@
-#!/bin/bash
-# Six fake tasks that show each kind of bar. Run it from a Claude Code
-# session with the plugin enabled, for example: ! examples/demo.sh
-if ! command -v progress >/dev/null; then
+#!/usr/bin/env bash
+# Six fake tasks that show each kind of bar, for about 45 seconds.
+# Run it in a Claude Code session with the plugin enabled: ! examples/demo.sh
+set -u
+if ! command -v claude-progress >/dev/null; then
   PATH="$(cd "$(dirname "$0")/.." && pwd)/plugins/simple-progress-bars/bin:$PATH"
 fi
-[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || { echo "Run this inside a Claude Code session."; exit 1; }
-# 1. Count with detail, about 45 s.
-( n=90; for i in $(seq $n); do progress -n convert-videos "$i/$n" "clip_$(printf %03d $i).mkv"; sleep 0.$((RANDOM % 4 + 3)); done; progress -n convert-videos done ) &
-# 2. Bytes with a rate, about 40 s.
-( for i in $(seq 0 40 2048); do progress -n download-ubuntu-iso "${i}M/2G"; sleep 0.75; done; progress -n download-ubuntu-iso done ) &
-# 3. Parallel workers, 120 items, 6 at a time.
-( progress -n thumbnails -t 120; seq 120 | xargs -P6 -I{} sh -c 'sleep 0.$((RANDOM % 9 + 10)); progress -n thumbnails +1'; progress -n thumbnails done ) &
-# 4. tqdm-style output read with -p. The command exits 0.
-( progress -n train-model -p -- python3 -c '
+if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+  echo "Run this inside a Claude Code session."
+  exit 1
+fi
+
+# A count with detail text, at an uneven speed.
+convert() {
+  local n=90 i
+  for ((i = 1; i <= n; i++)); do
+    claude-progress -n convert-videos "$i/$n" "$(printf 'clip_%03d.mkv' "$i")"
+    sleep "0.$((RANDOM % 4 + 3))"
+  done
+  claude-progress -n convert-videos "done"
+}
+
+# Sizes, with a rate.
+download() {
+  local mb
+  for ((mb = 0; mb <= 2048; mb += 40)); do
+    claude-progress -n download-ubuntu-iso "${mb}M/2G"
+    sleep 0.75
+  done
+  claude-progress -n download-ubuntu-iso "done"
+}
+
+# One total, then +1 from six parallel workers.
+thumbnails() {
+  claude-progress -n thumbnails -t 120
+  # shellcheck disable=SC2016  # the worker shell expands these
+  seq 120 | xargs -P6 -I{} bash -c 'sleep "0.$((RANDOM % 9 + 10))"; claude-progress -n thumbnails +1'
+  claude-progress -n thumbnails "done"
+}
+
+# tqdm-style output, read with -p. The command exits 0.
+train() {
+  claude-progress -n train-model -p -- python3 -c '
 import sys, time
 for i in range(1, 51):
-    sys.stderr.write(f"\r{i*2:3d}%|{"#"*(i//5):10s}| {i}/50 [00:{i:02d}<00:{50-i:02d}, 1.2it/s]"); sys.stderr.flush(); time.sleep(0.6)
-' 2>/dev/null ) &
-# 5. A script that dies before done: the bar shows "stopped".
-( bash -c 'for i in $(seq 100); do progress -n flaky-script "$i/100"; sleep 0.3; [ $i = 40 ] && kill -9 $$; done' ) &
-# 6. A task that fails with a message.
-( for i in $(seq 25); do progress -n upload-to-nas "$i/60" "photo_$i.jpg"; sleep 0.8; done; progress -n upload-to-nas fail "server returned 503" ) &
+    bar = "#" * (i // 5)
+    sys.stderr.write("\r%3d%%|%-10s| %d/50 [00:%02d<00:%02d, 1.2it/s]" % (i * 2, bar, i, i, 50 - i))
+    sys.stderr.flush()
+    time.sleep(0.6)
+' 2>/dev/null
+}
+
+# A script that is killed at 40 of 100: the bar shows "stopped".
+flaky() {
+  # shellcheck disable=SC2016  # the inner shell expands these
+  bash -c 'for i in $(seq 100); do claude-progress -n flaky-script "$i/100"; sleep 0.3; [ "$i" = 40 ] && kill -9 $$; done'
+}
+
+# A task that fails with a message.
+upload() {
+  local i
+  for ((i = 1; i <= 25; i++)); do
+    claude-progress -n upload-to-nas "$i/60" "photo_$i.jpg"
+    sleep 0.8
+  done
+  claude-progress -n upload-to-nas fail "server returned 503"
+}
+
+convert & download & thumbnails & train & flaky & upload &
 wait

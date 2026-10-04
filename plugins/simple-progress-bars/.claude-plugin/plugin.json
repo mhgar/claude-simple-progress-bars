@@ -2,7 +2,7 @@
   "name": "simple-progress-bars",
   "displayName": "Simple Progress Bars",
   "version": "0.1.0",
-  "description": "Progress bars with time estimates for long scripts that Claude runs. Scripts report with one command: progress 17/240.",
+  "description": "Progress bars with time estimates for long scripts that Claude runs. Scripts report with one command: claude-progress 17/240.",
   "author": { "name": "Max Hunter", "url": "https://github.com/mhgar" },
   "homepage": "https://github.com/mhgar/simple-progress-bars",
   "repository": "https://github.com/mhgar/simple-progress-bars",
