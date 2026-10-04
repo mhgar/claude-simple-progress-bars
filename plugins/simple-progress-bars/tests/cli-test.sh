@@ -106,13 +106,49 @@ fi
 check "--dir prints the progress directory" "$BASE" "$("$P" --dir)"
 check "--dir uses ~/.claude without CLAUDE_CONFIG_DIR" "$HOME/.claude/progress" "$(env -u CLAUDE_CONFIG_DIR "$P" --dir)"
 
-mkdir -p "$BASE/old-session" "$BASE/recent-session"
-touch -t 202001010000 "$BASE/old-session"
-CLAUDE_CODE_SESSION_ID=new-session "$P" -n x 1/2
-check "a new session removes directories older than 24 hours" no "$(exists "$BASE/old-session")"
-check "a new session keeps recent directories" yes "$(exists "$BASE/recent-session")"
+# --- Cleanup of old sessions
 
-check "no temporary files are left" 0 "$(find "$BASE" -name '.*' -type f | wc -l | tr -d ' ')"
+# The pid of a live process, as Claude Code gives it in CLAUDE_PID: a Windows pid in Git Bash.
+if [ -n "$IS_WINDOWS" ]; then LIVE_PID=$(cat /proc/$$/winpid); else LIVE_PID=$$; fi
+# stamp DAYS_AGO: prints a touch -t time, on GNU and BSD date.
+stamp() {
+  local t=$(($(date +%s) - $1 * 86400))
+  date -d "@$t" +%Y%m%d%H%M 2>/dev/null || date -r "$t" +%Y%m%d%H%M
+}
+# session NAME OWNER_JSON DAYS_AGO: makes a session directory with one task, all that old.
+session() {
+  mkdir -p "$BASE/$1" && echo 1/2 > "$BASE/$1/task"
+  if [ -n "$2" ]; then printf '%s' "$2" > "$BASE/$1/.owner"; fi
+  # -c: create no file. The directory goes last, because a change inside it moves its time.
+  touch -c -t "$(stamp "$3")" "$BASE/$1/"* "$BASE/$1/.owner" "$BASE/$1"
+}
+sweeps=0
+sweep() { sweeps=$((sweeps + 1)); CLAUDE_CODE_SESSION_ID="sweeper-$sweeps" "$P" -n x 1/2; }
+
+CLAUDE_CODE_SESSION_ID=owned CLAUDE_PID=$LIVE_PID "$P" -n x 1/2
+check "a new session records its owner" yes "$(grep -q "\"pid\":$LIVE_PID" "$BASE/owned/.owner" && echo yes || echo no)"
+touch -c -t "$(stamp 30)" "$BASE/owned/x" "$BASE/owned/.owner" "$BASE/owned"
+CLAUDE_CODE_SESSION_ID=no-owner env -u CLAUDE_PID "$P" -n x 1/2
+check "with no CLAUDE_PID, a session records no owner" no "$(exists "$BASE/no-owner/.owner")"
+
+session dead-old '{"pid":999999,"procStart":"1"}' 1
+session dead-recent '{"pid":999999,"procStart":"1"}' 0
+session dead-appended '{"pid":999999,"procStart":"1"}' 1
+touch "$BASE/dead-appended/task" # an append changes the file, not the directory
+session orphan-recent '' 2
+session orphan-old '' 8
+[ -z "$IS_WINDOWS" ] && session reused "{\"pid\":$LIVE_PID,\"procStart\":\"123\"}" 1
+sweep
+
+check "a session with a live owner stays, however old" yes "$(exists "$BASE/owned")"
+check "a dead owner's session goes after 1 hour" no "$(exists "$BASE/dead-old")"
+check "a dead owner's session stays within 1 hour" yes "$(exists "$BASE/dead-recent")"
+check "a recent append keeps a dead owner's session" yes "$(exists "$BASE/dead-appended")"
+check "a session with no owner stays for 7 days" yes "$(exists "$BASE/orphan-recent")"
+check "a session with no owner goes after 7 days" no "$(exists "$BASE/orphan-old")"
+[ -z "$IS_WINDOWS" ] && check "a reused pid does not keep a session" no "$(exists "$BASE/reused")"
+
+check "no temporary files are left" 0 "$(find "$BASE" -name '.*' ! -name .owner -type f | wc -l | tr -d ' ')"
 
 # --- Help, the shim, and the README
 

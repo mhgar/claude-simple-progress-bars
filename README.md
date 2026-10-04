@@ -93,7 +93,7 @@ Run `/plugin configure simple-progress-bars@simple-progress-bars`, or use the co
 3. The plugin reads the session directory 4 times a second. It reads a file again only when the file changes, and it folds the lines in order into the state of the task.
 4. The plugin watches its foreground Bash calls. When a call ends, the bars that only that call can own end too.
 
-**What it touches:** The command writes only in `<config>/progress`. When a session writes its first task, the command deletes the session directories there that are older than 24 hours. The plugin only reads, and it runs no processes. Neither part uses the network.
+**What it touches:** The command writes only in `<config>/progress`. Each session folder records its Claude Code process in `.owner` (the pid and its start time, as Claude Code keeps them in `~/.claude/sessions`). When a session writes its first task, the command deletes the folders of other sessions that are over: 1 hour after the last write once their Claude Code process has exited, or after 7 days when the folder has no owner record. A folder whose Claude Code process runs stays, however long its tasks take. The plugin only reads, and it runs no processes. Neither part uses the network.
 
 ## What the plugin changes in Claude Code
 

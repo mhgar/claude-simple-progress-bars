@@ -33,9 +33,20 @@ The command MUST exit 0 in all cases. A usage error or a failed write MUST print
 - **WHEN** `CLAUDE_CODE_SESSION_ID` is `../escape`
 - **THEN** the command writes nothing and exits 0
 
-### Requirement: Old sessions
-When a call creates a new session directory, it MUST first delete the directories in `<config>/progress` that are older than 24 hours.
+### Requirement: Session owner
+When a call creates a session directory and `CLAUDE_PID` is set, it MUST write `.owner` there: a JSON object with `pid` and `procStart`, the start time of that process, as Claude Code keeps them in `~/.claude/sessions`. The owner MUST count as alive while the process runs and its start time is the same. Windows MUST check the pid with `tasklist`.
 
-#### Scenario: A new session
-- **WHEN** an old session directory is 2 days old, and a new session writes its first task
-- **THEN** the old directory is gone, and the directories of recent sessions stay
+#### Scenario: A reused pid
+- **WHEN** the pid in `.owner` runs again, but with another start time
+- **THEN** the owner counts as dead
+
+### Requirement: Old sessions
+When a call creates a new session directory, it MUST check the other session directories. A directory with a live owner MUST stay. One with a dead owner MUST go 1 hour after its newest write, and one with no owner record 7 days after it. The newest write MUST be the newest time of any entry in the directory.
+
+#### Scenario: A long task
+- **WHEN** a task of a live session has written nothing for 2 days
+- **THEN** its session directory stays
+
+#### Scenario: An append
+- **WHEN** a dead owner's directory is 2 days old, but a file in it got an append 10 minutes ago
+- **THEN** the directory stays
