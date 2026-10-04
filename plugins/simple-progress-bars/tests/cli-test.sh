@@ -29,6 +29,9 @@ check() {
 
 exists() { [ -e "$D/$1" ] && echo yes || echo no; }
 
+# under_ms START LIMIT: prints yes when less than LIMIT ms passed since START (from date +%s%N).
+under_ms() { [ $((($(date +%s%N) - $1) / 1000000)) -lt "$2" ] && echo yes || echo no; }
+
 # --- Direct reports
 
 "$P" -n count 17/240 clip.mkv
@@ -88,7 +91,10 @@ check "clear removes the file" no "$(exists gone)"
 "$P" -n 'a/b/../c' 1/2
 check "a name cannot leave the directory" 1.0 "$(field 'a-b-..-c' 'done')"
 "$P" -n job.lock 1/2
-check "a name cannot look like a lock file" 1.0 "$(field job.lock_ 'done')"
+check "a name that ends in .lock is a task name" 1.0 "$(field job.lock 'done')"
+"$P" -n .hidden 1/2
+check "a name cannot start with a dot" 1.0 "$(field hidden 'done')"
+check "the store keeps its lock as a dot file" yes "$(exists .hidden.lock)"
 
 printf '#!/bin/bash\n"%s" 3/9\n' "$P" > "$TMP/convert-videos.sh"
 bash "$TMP/convert-videos.sh"
@@ -104,6 +110,13 @@ out=$(seq 1000 | "$P" -n lines -l -t 5000 | wc -l)
 check "line mode passes the output through" 1000 "$out"
 check "line mode counts lines" 1000.0 "$(field lines 'done')"
 check "line mode ends at the real count" 1000.0 "$(field lines total)"
+
+head -c 500 /dev/zero | "$P" -n bytes -b -t 1K >/dev/null
+check "byte mode ends at the real count" "500.0 500.0" "$(field bytes 'done') $(field bytes total)"
+
+"$P" -n retotal 20/100
+"$P" -n retotal -t 200
+check "-t alone in a run keeps the count" "20.0 200.0" "$(field retotal 'done') $(field retotal total)"
 
 "$P" -n stdout-only -l -- sh -c 'seq 3; seq 5 >&2' >/dev/null 2>&1
 check "line mode counts stdout only" 3.0 "$(field stdout-only 'done')"
@@ -128,7 +141,7 @@ check "an address does not stop the output" 2001 "$out"
 
 start=$(date +%s%N)
 timeout 10 "$P" -n slow -p -- python3 -c 'print("1," * 30000)' >/dev/null
-check "long runs of digits scan fast" yes "$([ $(( ($(date +%s%N) - start) / 1000000 )) -lt 2000 ] && echo yes || echo no)"
+check "long runs of digits scan fast" yes "$(under_ms "$start" 2000)"
 
 timeout 10 "$P" -n buffered -p -- python3 -c 'import time
 for i in range(1, 6): print(f"step {i}/5"); time.sleep(0.3)' >/dev/null &
@@ -141,7 +154,7 @@ check "a closed reader does not hang" 0 "$([ "${PIPESTATUS[0]}" -eq 124 ] && ech
 
 start=$(date +%s%N)
 timeout 10 "$P" -n grandchild -p -- sh -c '(sleep 4) & echo started' >/dev/null
-check "a background grandchild does not hold progress" yes "$([ $(( ($(date +%s%N) - start) / 1000000 )) -lt 3000 ] && echo yes || echo no)"
+check "a background grandchild does not hold progress" yes "$(under_ms "$start" 3000)"
 
 { "$P" -n killed -p -- sh -c 'kill -TERM $$'; } 2>/dev/null
 check "a signal death passes through as 128+N" 143 "$?"
@@ -162,6 +175,8 @@ out=$(env -u CLAUDE_CODE_SESSION_ID "$P" -n nosession -p -- sh -c 'echo hi; exit
 check "no session still runs COMMAND" "4 hi" "$? $out"
 env -u CLAUDE_CODE_SESSION_ID "$P" -p -- /nonexistent/cmd 2>/dev/null
 check "no session keeps exit 127" 127 "$?"
+timeout 10 env -u CLAUDE_CODE_SESSION_ID "$P" -p -- seq 2000000 | head -1 >/dev/null
+check "no session: a closed reader does not hang" 0 "$([ "${PIPESTATUS[0]}" -eq 124 ] && echo 124 || echo 0)"
 
 out=$(seq 1000 | "$P" -n badtotal -l -t "" 2>/dev/null | wc -l)
 check "a bad total in a pipe still passes the input through" 1000 "$out"
@@ -170,11 +185,15 @@ check "a bad total before -- still runs COMMAND" 5 "$?"
 
 # --- The shim for scripts outside Claude Code
 
-shim=$(sed -n "s/^  '\(command -v claude-progress.*\)' +$/\1/p; s/^  '\(while \[.*\)'$/\1/p" "$ROOT/hooks/prompt.ts" | tr -d '\n')
-out=$(env -u CLAUDE_CODE_SESSION_ID PATH=/usr/bin:/bin bash -c "$shim"'
-claude-progress -n x 1/2 && claude-progress -n x done && seq 3 | claude-progress -n y -l | wc -l && claude-progress -n z -p -- sh -c "exit 6"; echo $?')
-check "the shim does nothing, passes input, and runs COMMAND" "3 6" "$(echo "$out" | tr '\n' ' ' | sed 's/ $//')"
-check "the README gives the same shim" yes "$(grep -qF -- "$shim" "$ROOT/../../README.md" && echo yes || echo no)"
+# shim SCRIPT: runs SCRIPT in bash with the shim, where claude-progress is not on PATH.
+shim() { env -u CLAUDE_CODE_SESSION_ID PATH=/usr/bin:/bin bash -c ". \"$ROOT/shim.sh\"; $1" 2>&1; }
+
+check "the shim makes direct reports do nothing" "" "$(shim 'claude-progress -n x 1/2; claude-progress -n x done')"
+check "the shim passes pipe input through" 3 "$(shim 'seq 3 | claude-progress -n y -l | wc -l')"
+check "the shim knows the long pipe options" 3 "$(shim 'seq 3 | claude-progress --lines | wc -l')"
+check "the shim runs COMMAND and keeps its status" "hi 6" "$(shim 'claude-progress -n z -p -- sh -c "echo hi; exit 6"; echo $?' | tr '\n' ' ' | sed 's/ $//')"
+check "the shim does not run detail text after VALUE" "" "$(shim 'claude-progress -n x 3/9 cp -- echo RAN')"
+check "the README gives the same shim" yes "$(python3 -c 'import sys; print("yes" if open(sys.argv[1]).read().strip() in open(sys.argv[2]).read() else "no")' "$ROOT/shim.sh" "$ROOT/../../README.md")"
 
 # --- Files
 

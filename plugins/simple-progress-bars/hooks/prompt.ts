@@ -1,10 +1,11 @@
-/** A shell line that makes a saved script work where claude-progress is not installed. */
-export const SHIM =
-  'command -v claude-progress >/dev/null || claude-progress() { local a m=; for a; do case $a in --) break;; -l|-b|-p) m=1;; esac; done; ' +
-  'while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done; if [ $# -gt 0 ]; then shift; "$@"; elif [ -n "$m" ]; then cat; fi; }'
-
 /** Returns the system prompt section that teaches Claude the command. */
-export function promptSection(minSeconds: number): string {
+export function promptSection(minSeconds: number, shim: string | null): string {
+  const portable = shim === null ? [] : [
+    'In a bash script file that people can run outside Claude Code, put these lines near the top, so the calls do nothing there:',
+    '```bash',
+    shim.trim(),
+    '```',
+  ]
   return [
     '# Progress bars for long scripts',
     '',
@@ -20,10 +21,7 @@ export function promptSection(minSeconds: number): string {
     '- `claude-progress -n NAME -p -- python train.py` reads tqdm, pv, or rsync output from the command and reports its exit status',
     '',
     'Each call takes about 15 ms, so in fast loops report every Nth item. The command never fails the script.',
-    'In a script file that people can run outside Claude Code, put this line near the top, so the calls do nothing there:',
-    '```bash',
-    SHIM,
-    '```',
+    ...portable,
     'Run `claude-progress --help` for the full reference.',
   ].join('\n')
 }

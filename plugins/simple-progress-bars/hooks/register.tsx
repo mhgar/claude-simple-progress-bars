@@ -5,7 +5,7 @@ import type { Bar, Board } from '../types'
 import { rows } from './layout'
 import { parse } from './parse'
 import { promptSection } from './prompt'
-import { ingest, isTaskName, needsRead, settle, watchedPids } from './watch'
+import { ingest, isTaskName, needsRead, owners, settle } from './watch'
 import type { TaskFile } from './watch'
 
 const board = atom({ plugin: 'simple-progress-bars', key: 'board' } as const, { bars: [], now: 0 } as Board)
@@ -14,7 +14,7 @@ const board = atom({ plugin: 'simple-progress-bars', key: 'board' } as const, { 
 const TICK_MS = 250
 const ID_CHECK_TICKS = 4 // once a second: /clear and /resume change the session id
 const OLD_DIR_MINUTES = 24 * 60
-const INDENT = '  ' // the hint line's own indent
+const INDENT = 2 // cells: the hint line's own indent
 // Only directories named like a session id are swept, whatever PROGRESS_DIR names.
 const SESSION_DIR_GLOB = '????????-????-????-????-????????????'
 // The process goes on after these ends, under a new session id.
@@ -30,6 +30,8 @@ type Watch = {
   ticks: number
   timer: Timer | null
   logged: Set<string>
+  /** The text of shim.sh for the prompt, or null when its read failed. */
+  shim: string | null
 }
 
 /** Writes a failure to the debug log, once per kind of failure. */
@@ -66,24 +68,22 @@ async function alive($: EngineInterface, w: Watch, pids: readonly number[]): Pro
 /** Lists one session directory. Reads only the files that changed since the last read. */
 async function readDir($: EngineInterface, dir: string, byKey: ReadonlyMap<string, Bar>): Promise<TaskFile[]> {
   const entries = await $.fs.list(dir).catch(() => [])
-  const files: TaskFile[] = []
-  for (const entry of entries) {
-    if (entry.kind !== 'file' || !isTaskName(entry.name)) continue
+  const tasks = entries.filter(e => e.kind === 'file' && isTaskName(e.name))
+  return Promise.all(tasks.map(async (entry): Promise<TaskFile> => {
     const key = `${dir}/${entry.name}`
     const isChanged = needsRead(byKey.get(key), entry.mtimeMs)
-    const text = isChanged ? await $.fs.read(key).catch(() => '') : ''
-    files.push({ key, name: entry.name, mtimeMs: entry.mtimeMs, update: isChanged ? parse(text) : null })
-  }
-  return files
+    const update = isChanged ? parse(await $.fs.read(key).catch(() => '')) : null
+    return { key, name: entry.name, mtimeMs: entry.mtimeMs, update }
+  }))
 }
 
 /** Deletes the files of expired bars. A file that changed since its last read stays: it holds a new run. */
 async function removeFiles($: EngineInterface, w: Watch, expired: readonly Bar[]) {
-  const paths: string[] = []
-  for (const bar of expired) {
-    const stat = await $.fs.stat(bar.key).catch(() => null)
-    if (stat !== null && stat.mtimeMs === bar.updatedAt) paths.push(bar.key, `${bar.key}.lock`)
-  }
+  const stats = await Promise.all(expired.map(b => $.fs.stat(b.key).catch(() => null)))
+  // The store keeps its lock beside the task file, as a dot file: <dir>/.<name>.lock
+  const paths = expired.flatMap((b, i) => stats[i]?.mtimeMs === b.updatedAt
+    ? [b.key, `${b.key.slice(0, b.key.length - b.name.length)}.${b.name}.lock`]
+    : [])
   if (paths.length > 0) await run($, w, 'rm', ['rm', '-f', '--', ...paths])
 }
 
@@ -101,14 +101,14 @@ async function tick($: EngineInterface, w: Watch) {
     w.ticks += 1
     if (w.ticks % ID_CHECK_TICKS === 0) await followSessionId($, w)
 
-    const now = await $.clock.now()
-    const prev = await read($, board)
+    const [now, prev] = await Promise.all([$.clock.now(), read($, board)])
     const byKey = new Map(prev.bars.map(b => [b.key, b]))
     const files = (await Promise.all(w.dirs.map(d => readDir($, d, byKey)))).flat()
 
     // The files are read first, so a `done` written just before exit wins over the process check.
-    const ingested = ingest(prev.bars, files)
-    const live = await alive($, w, watchedPids(ingested))
+    const ingested = ingest(byKey, files)
+    const { check, wrote } = owners(ingested, files)
+    const live = new Set([...(await alive($, w, check)), ...wrote])
     const { bars, expired } = settle(ingested, live, now)
     await removeFiles($, w, expired)
 
@@ -119,17 +119,26 @@ async function tick($: EngineInterface, w: Watch) {
 }
 
 async function start($: EngineInterface, w: Watch) {
-  const dir = await run($, w, 'claude-progress --dir', [`${$.plugin.root}/bin/claude-progress`, '--dir'])
+  const [dir, id, hasProc, shim] = await Promise.all([
+    run($, w, 'claude-progress --dir', [`${$.plugin.root}/bin/claude-progress`, '--dir']),
+    $.session.id(),
+    $.fs.exists('/proc/self').catch(() => false),
+    $.fs.read(`${$.plugin.root}/shim.sh`).catch((error: unknown) => {
+      log($, w, 'shim.sh', error)
+      return null
+    }),
+  ])
+  w.shim = shim
   const base = dir?.stdout.trim() ?? ''
   if (dir === null || dir.exitCode !== 0 || base === '') return
   w.base = base
-  w.dirs = [`${base}/${await $.session.id()}`]
-  w.hasProc = await $.fs.exists('/proc/self').catch(() => false)
+  w.dirs = [`${base}/${id}`]
+  w.hasProc = hasProc
   await run($, w, 'mkdir', ['mkdir', '-p', '-m', '700', base, ...w.dirs])
-  // Remove the directories that crashed sessions left behind.
-  await run($, w, 'sweep', ['find', base, '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-name', SESSION_DIR_GLOB,
-    '-mmin', `+${OLD_DIR_MINUTES}`, '-exec', 'rm', '-rf', '--', '{}', '+'])
   w.timer = $.clock.every(TICK_MS, () => void tick($, w))
+  // Remove the directories that crashed sessions left behind. Nothing waits for it.
+  void run($, w, 'sweep', ['find', base, '-mindepth', '1', '-maxdepth', '1', '-type', 'd', '-name', SESSION_DIR_GLOB,
+    '-mmin', `+${OLD_DIR_MINUTES}`, '-exec', 'rm', '-rf', '--', '{}', '+'])
 }
 
 async function end($: EngineInterface, w: Watch, reason: string) {
@@ -145,7 +154,7 @@ export const register: Register = (on, options) => {
   const position = options.position === 'above' ? 'above' : 'below'
   const maxRows = typeof options.maxRows === 'number' ? Math.max(1, Math.round(options.maxRows)) : 3
   const minSeconds = typeof options.minSeconds === 'number' ? Math.max(1, options.minSeconds) : 30
-  const w: Watch = { base: null, dirs: [], hasProc: true, isBusy: false, ticks: 0, timer: null, logged: new Set() }
+  const w: Watch = { base: null, dirs: [], hasProc: true, isBusy: false, ticks: 0, timer: null, logged: new Set(), shim: null }
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -160,7 +169,7 @@ export const register: Register = (on, options) => {
 
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
-    const section = { id: 'simple-progress-bars:usage', text: promptSection(minSeconds), scope: 'session' as const }
+    const section = { id: 'simple-progress-bars:usage', text: promptSection(minSeconds, w.shim), scope: 'session' as const }
     return { sections: [...result.sections, section] }
   })
 
@@ -177,9 +186,8 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column">
           {hint}
           <Text dimColor wrap="truncate">{'─'.repeat(columns)}</Text>
-          {rows(bars, Math.max(20, columns - 2 * INDENT.length), now, maxRows).map((row, r) => (
-            <Box key={`row${r}`} flexDirection="row">
-              <Text>{INDENT}</Text>
+          {rows(bars, Math.max(20, columns - 2 * INDENT), now, maxRows).map((row, r) => (
+            <Box key={`row${r}`} flexDirection="row" paddingLeft={INDENT}>
               {row.map((p, i) => (
                 <Text key={String(i)} color={p.color} dimColor={p.dim} bold={p.bold} wrap="truncate">{p.text}</Text>
               ))}

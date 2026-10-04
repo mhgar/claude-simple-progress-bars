@@ -11,17 +11,16 @@ export type TaskFile = {
   update: Update | null
 }
 
-/** Returns true for a file name that is a task, not the store's lock or temporary file. */
-export const isTaskName = (name: string) => !name.endsWith('.lock') && !name.endsWith('.tmp')
+/** Returns true for a task file. Dot files are the store's locks and temporary files. */
+export const isTaskName = (name: string) => !name.startsWith('.')
 
 /** Returns true when a file must be read again: it is new, or it changed since the bar's update. */
 export function needsRead(bar: Bar | undefined, mtimeMs: number): boolean {
   return bar === undefined || mtimeMs > bar.updatedAt
 }
 
-/** Applies the files to the bars. A bar whose file is gone is dropped. */
-export function ingest(prev: readonly Bar[], files: readonly TaskFile[]): Bar[] {
-  const byKey = new Map(prev.map(b => [b.key, b]))
+/** Applies the files to the bars, which `byKey` holds by key. A bar whose file is gone is dropped. */
+export function ingest(byKey: ReadonlyMap<string, Bar>, files: readonly TaskFile[]): Bar[] {
   const bars: Bar[] = []
   for (const f of files) {
     const old = byKey.get(f.key)
@@ -31,9 +30,18 @@ export function ingest(prev: readonly Bar[], files: readonly TaskFile[]): Bar[] 
   return bars
 }
 
-/** Returns the pids that the process check must look at. */
-export function watchedPids(bars: readonly Bar[]): number[] {
-  return [...new Set(bars.flatMap(b => (b.state === 'run' && b.pid !== null ? [b.pid] : [])))]
+/** Returns the owners of running bars, split by whether their file changed in this read. */
+export function owners(bars: readonly Bar[], files: readonly TaskFile[]): { check: number[]; wrote: number[] } {
+  const changed = new Set(files.filter(f => f.update !== null).map(f => f.key))
+  const check = new Set<number>()
+  const wrote = new Set<number>()
+  for (const b of bars) {
+    if (b.state !== 'run' || b.pid === null) continue
+    // An owner that wrote in this read is alive. Only the others need the process check.
+    if (changed.has(b.key)) wrote.add(b.pid)
+    else check.add(b.pid)
+  }
+  return { check: [...check].filter(p => !wrote.has(p)), wrote: [...wrote] }
 }
 
 /** Ends the bars whose process exited, and splits off the bars to remove. */

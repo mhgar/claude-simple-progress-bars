@@ -57,10 +57,23 @@ claude-progress -n convert done
 
 Run `claude-progress --help` for the full reference. If you leave out `-n`, the task name is the name of the calling script.
 
-**Scripts that run outside Claude Code.** Outside a Claude Code session, `claude-progress` reports nothing, but other machines do not have the command at all. Claude puts this line near the top of a script file that people can run elsewhere. Then the calls do nothing there, pipe modes pass the input through, and `-- COMMAND` runs the command:
+**Scripts that run outside Claude Code.** Outside a Claude Code session, `claude-progress` reports nothing, but other machines do not have the command at all. Claude puts these lines near the top of a bash script file that people can run elsewhere. Then the calls do nothing there, pipe modes pass the input through, and `-- COMMAND` runs the command:
 
 ```bash
-command -v claude-progress >/dev/null || claude-progress() { local a m=; for a; do case $a in --) break;; -l|-b|-p) m=1;; esac; done; while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done; if [ $# -gt 0 ]; then shift; "$@"; elif [ -n "$m" ]; then cat; fi; }
+# Lets a bash script run where claude-progress is not installed: direct reports
+# do nothing, pipe modes pass their input through, and "-- COMMAND" runs COMMAND.
+command -v claude-progress >/dev/null || claude-progress() {
+  local pipe=
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -n | --name | -t | --total) shift; [ $# -gt 0 ] && shift ;;
+      -l | --lines | -b | --bytes | -p | --parse) pipe=1; shift ;;
+      --) shift; "$@"; return ;;
+      *) [ -z "$pipe" ] && return 0; shift ;; # VALUE ends a direct report. In a pipe mode, detail text.
+    esac
+  done
+  if [ -n "$pipe" ]; then cat; fi
+}
 ```
 
 ## What the bar shows

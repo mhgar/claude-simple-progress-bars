@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { upd } from './fixtures'
 import { parse } from './parse'
 
-const json = (o: object) => JSON.stringify({ state: 'run', done: 1, total: 10, unit: '', detail: '', msg: '', pid: 100, ...o })
+const json = (o: object) => JSON.stringify({ ...upd({ done: 1, total: 10, pid: 100 }), ...o })
 
 describe('parse', () => {
   test('reads every field of a record', () => {

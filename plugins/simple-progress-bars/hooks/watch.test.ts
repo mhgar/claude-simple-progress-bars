@@ -1,25 +1,28 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import type { Bar } from '../types'
 import { run, upd } from './fixtures'
-import { ingest, isTaskName, needsRead, settle, watchedPids } from './watch'
+import { ingest, isTaskName, needsRead, owners, settle } from './watch'
+
+const byKey = (bars: Bar[]) => new Map(bars.map(b => [b.key, b]))
 
 describe('ingest', () => {
   test('drops a bar whose file is gone', () => {
     const prev = [run('a', [[{ state: 'fail', done: 1, total: 2 }, 0]])]
 
-    expect(ingest(prev, [])).toEqual([])
+    expect(ingest(byKey(prev), [])).toEqual([])
   })
 
   test('keeps a bar whose file did not parse', () => {
     const prev = [run('a', [[{ done: 1, total: 2 }, 0]])]
 
-    const bars = ingest(prev, [{ key: '/d/a', name: 'a', mtimeMs: 5, update: null }])
+    const bars = ingest(byKey(prev), [{ key: '/d/a', name: 'a', mtimeMs: 5, update: null }])
 
     expect(bars).toEqual(prev)
   })
 
   test('adds a bar for a new file', () => {
-    const bars = ingest([], [{ key: '/d/b', name: 'b', mtimeMs: 5, update: upd({ done: 1, total: 4 }) }])
+    const bars = ingest(new Map(), [{ key: '/d/b', name: 'b', mtimeMs: 5, update: upd({ done: 1, total: 4 }) }])
 
     expect(bars[0]).toMatchObject({ key: '/d/b', name: 'b', done: 1, total: 4 })
   })
@@ -36,7 +39,7 @@ describe('needsRead', () => {
 })
 
 describe('isTaskName', () => {
-  for (const [name, expected] of [['convert', true], ['convert.lock', false], ['convert.123.tmp', false]] as const) {
+  for (const [name, expected] of [['convert', true], ['job.lock', true], ['.convert.lock', false], ['.convert.123.tmp', false]] as const) {
     test(`${name}: ${expected}`, () => {
       expect(isTaskName(name)).toBe(expected)
     })
@@ -77,10 +80,18 @@ describe('settle', () => {
   })
 })
 
-describe('watchedPids', () => {
+describe('owners', () => {
   test('lists each owner of a running bar once', () => {
     const bars = [run('a', [[{ pid: 7 }, 0]]), run('b', [[{ pid: 7 }, 0]]), run('c', [[{ state: 'done', pid: 8 }, 0]])]
 
-    expect(watchedPids(bars)).toEqual([7])
+    expect(owners(bars, [])).toEqual({ check: [7], wrote: [] })
+  })
+
+  test('skips the process check for an owner that just wrote', () => {
+    const bars = [run('a', [[{ pid: 7 }, 0]])]
+
+    const split = owners(bars, [{ key: '/d/a', name: 'a', mtimeMs: 9, update: upd({ pid: 7 }) }])
+
+    expect(split).toEqual({ check: [], wrote: [7] })
   })
 })

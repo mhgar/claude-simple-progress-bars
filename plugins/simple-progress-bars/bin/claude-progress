@@ -101,23 +101,29 @@ def parse_total(text):
 
 
 def parse_value(word):
-    """Returns the kind of a VALUE word and its numbers, as a tuple."""
+    """Returns (kind, fields) for VALUE. `fields` holds the record fields that VALUE sets.
+
+    The kinds: 'total' (no VALUE, only -t), 'clear', 'done', 'fail', 'add',
+    'count', 'percent', and 'text'.
+    """
+    if word is None:
+        return 'total', {}
     lower = word.lower()
     if lower in ('clear', 'done', 'fail', 'failed'):
-        return ('fail',) if lower == 'failed' else (lower,)
+        return ('fail' if lower == 'failed' else lower), {}
     if word.startswith('+'):
         step = parse_total(word[1:])
         if step is not None:
-            return ('add', step)
+            return 'add', {'step': step[0], 'is_bytes': step[1]}
     m = RE_COUNT.fullmatch(word)
     if m:
         done, done_bytes = size(m.group(1), m.group(2))
         total, total_bytes = size(m.group(3), m.group(4))
-        return ('count', done, total, done_bytes or total_bytes)
+        return 'count', {'done': done, 'total': total, 'unit': 'B' if done_bytes or total_bytes else ''}
     m = RE_PERCENT.fullmatch(word)
     if m and float(m.group(1)) <= 100:
-        return ('percent', float(m.group(1)))
-    return ('text',)
+        return 'percent', {'done': float(m.group(1)), 'total': 100.0, 'unit': '%'}
+    return 'text', {}
 
 
 def record(*, state='run', done=0.0, total=None, unit='', detail='', msg='', pid=None):  # noqa: PLR0913  (one argument a field)
@@ -152,10 +158,9 @@ def base_dir():
 
 
 def clean_name(name):
-    """Returns a task name that is a safe file name in the session directory."""
+    """Returns a task name that is a safe file name. It never starts with a dot:
+    dot files in the session directory belong to the store, and the plugin skips them."""
     name = re.sub(r'[/\0\r\n]', '-', name).strip().lstrip('.')[:80]
-    if name.endswith(('.lock', '.tmp')):
-        name += '_'  # The plugin skips these endings, which belong to the store.
     return name or 'task'
 
 
@@ -163,8 +168,19 @@ class Store:
     """One task file. Writes are atomic, and changes run under a file lock."""
 
     def __init__(self, session_dir, name):
-        self.path = os.path.join(session_dir, clean_name(name))
+        self.dir = session_dir
+        self.name = clean_name(name)
+        self.path = os.path.join(session_dir, self.name)
+        self.has_dir = False
         self.failed = False
+
+    def lock_path(self):
+        return os.path.join(self.dir, f'.{self.name}.lock')
+
+    def make_dir(self):
+        if not self.has_dir:
+            os.makedirs(self.dir, mode=0o700, exist_ok=True)
+            self.has_dir = True
 
     def read(self):
         try:
@@ -177,8 +193,8 @@ class Store:
     def write(self, data):
         """Writes the record. A failure warns once and never stops the caller."""
         try:
-            os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
-            tmp = f'{self.path}.{os.getpid()}.tmp'
+            self.make_dir()
+            tmp = os.path.join(self.dir, f'.{self.name}.{os.getpid()}.tmp')
             with open(tmp, 'w') as f:
                 json.dump(data, f)
             os.replace(tmp, self.path)
@@ -191,8 +207,8 @@ class Store:
         """Reads the record, applies `change`, and writes the result under a lock."""
         import fcntl  # noqa: PLC0415  (startup time, see the imports)
         try:
-            os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
-            lock = open(f'{self.path}.lock', 'w')  # noqa: SIM115  (held for the whole change)
+            self.make_dir()
+            lock = open(self.lock_path(), 'w')  # noqa: SIM115  (held for the whole change)
         except OSError as e:
             warn(e)
             return
@@ -202,9 +218,25 @@ class Store:
 
     def clear(self):
         import contextlib  # noqa: PLC0415  (startup time, see the imports)
-        for path in (self.path, f'{self.path}.lock'):
+        for path in (self.path, self.lock_path()):
             with contextlib.suppress(OSError):
                 os.remove(path)
+
+
+class NullStore:
+    """A store that keeps nothing: the work runs, and nothing is reported."""
+
+    def read(self):
+        return record()
+
+    def write(self, data):
+        pass
+
+    def update(self, change):
+        pass
+
+    def clear(self):
+        pass
 
 
 # --- Direct reports ---------------------------------------------------------
@@ -220,11 +252,8 @@ def owner(prev, caller):
 
 def report(store, args):
     """Writes one direct report: VALUE and DETAIL from the command line."""
-    value = parse_value(args.value)
-    kind = value[0]
+    kind, fields = parse_value(args.value)
     detail = ' '.join(args.detail)
-    total = args.total
-
     if kind == 'clear':
         store.clear()
         return
@@ -233,24 +262,21 @@ def report(store, args):
         caller = None if kind == 'add' else os.getppid()
         if prev['state'] != 'run' and kind not in ('done', 'fail'):
             prev = record()  # a new run after an end starts from zero
-        rec = record(done=prev['done'], total=prev['total'], unit=prev['unit'],
-                     detail=prev['detail'], pid=owner(prev, caller))
+        rec = {**prev, 'state': 'run', 'msg': '', 'pid': owner(prev, caller)}
         if kind in ('done', 'fail'):
             rec.update(state=kind, msg=detail)
         elif kind == 'add':
-            rec['done'] += value[1][0]
-            rec['unit'] = 'B' if value[1][1] else rec['unit']
+            rec['done'] += fields['step']
+            rec['unit'] = 'B' if fields['is_bytes'] else rec['unit']
             rec['detail'] = detail or rec['detail']
-        elif kind == 'count':
-            rec.update(done=value[1], total=value[2], unit='B' if value[3] else '', detail=detail)
-        elif kind == 'percent':
-            rec.update(done=value[1], total=100.0, unit='%', detail=detail)
-        else:  # text: a new detail. The count and the total stay.
+        elif kind in ('count', 'percent'):
+            rec.update(fields, detail=detail)
+        elif kind == 'text':  # a new detail. The count and the total stay.
             rec['detail'] = ' '.join([args.value, *args.detail])
-        if total is not None:
-            rec['total'], rec['unit'] = total[0], 'B' if total[1] else rec['unit']
+        if args.total is not None:
+            rec['total'], rec['unit'] = args.total[0], 'B' if args.total[1] else rec['unit']
         if kind == 'done' and rec['total']:
-            rec['done'] = rec['total']
+            rec['done'] = rec['total']  # The last report is often "N-1 of N", before the last item.
         return rec
 
     store.update(change)
@@ -271,11 +297,11 @@ class Meter:
         self.unit = 'B' if args.mode == 'bytes' or (args.total and args.total[1]) else ''
         self.tails = {}
         self.source = None  # (stream, kind) of the first progress found in parse mode
-        self.dirty = True
+        self.dirty = False
         self.flusher = threading.Thread(target=self.flush_loop, daemon=True)
 
     def start(self):
-        self.write('run')
+        self.store.write(self.snapshot('run'))
         self.flusher.start()
 
     def add(self, stream, chunk):
@@ -291,7 +317,12 @@ class Meter:
             self.dirty = True
 
     def scan(self, stream, chunk):
-        text = (self.tails.get(stream, '') + chunk.decode(errors='replace'))[-SCAN_CHARS:]
+        # Decode only the end of the chunk. Its first character can be cut, so keep only SCAN_CHARS.
+        cut = 4 * SCAN_CHARS
+        text = chunk[-cut:].decode(errors='replace')
+        if len(chunk) < cut:
+            text = self.tails.get(stream, '') + text
+        text = text[-SCAN_CHARS:]
         self.tails[stream] = text
         # The newest segment with progress wins. tqdm and pv end a segment with \r.
         for segment in reversed(re.split(r'[\r\n]', text)):
@@ -305,25 +336,29 @@ class Meter:
                 _, self.done, self.total, self.unit = found
             return
 
+    def snapshot(self, state, msg=''):
+        """Returns the record now. The caller holds the lock, or no other thread runs yet."""
+        self.dirty = False
+        return record(state=state, done=self.done, total=self.total, unit=self.unit,
+                      detail=' '.join(self.args.detail), msg=msg, pid=os.getpid())
+
     def flush_loop(self):
         while not self.stop.wait(THROTTLE_S):
             with self.lock:
-                if self.dirty:
-                    self.write('run')
-
-    def write(self, state, msg=''):
-        self.dirty = False
-        self.store.write(record(state=state, done=self.done, total=self.total, unit=self.unit,
-                                detail=' '.join(self.args.detail), msg=msg, pid=os.getpid()))
+                rec = self.snapshot('run') if self.dirty else None
+            if rec is not None:
+                self.store.write(rec)  # outside the lock, so the pass-through never waits on a write
 
     def finish(self, state, msg=''):
         self.stop.set()
         with self.lock:
-            if self.args.mode == 'lines' and self.total and self.done < self.total and state == 'done':
-                self.total = self.done  # The guess was too high. The real end is now.
             if state == 'done' and self.total:
-                self.done = max(self.done, self.total)
-            self.write(state, msg)
+                if self.args.mode in ('lines', 'bytes'):
+                    self.total = self.done  # A measured count is the truth. The total was a guess.
+                else:
+                    self.done = max(self.done, self.total)  # Parsed output can stop before 100%.
+            rec = self.snapshot(state, msg)
+        self.store.write(rec)
 
 
 def find_progress(segment):
@@ -543,44 +578,16 @@ def name_from_argv(argv):
         if '-c' in words[1:3]:
             return None
         words = [w for w in words[1:] if not w.startswith('-')]
-    return os.path.splitext(words[0])[0] or None if words else None
+    return os.path.splitext(words[0])[0] if words else None
 
 
-def run_plain(args):
-    """Does the work with no reports: runs COMMAND, or passes input through."""
-    if args.command:
-        child, status = start(args.command)
-        if child is None:
-            return status
-        import threading  # noqa: PLC0415  (startup time, see the imports)
-        pumps = [threading.Thread(target=pump, args=(src, dst, lambda _c: None), daemon=True)
-                 for src, dst in ((child.stdout, sys.stdout.buffer), (child.stderr, sys.stderr.buffer))]
-        for t in pumps:
-            t.start()
-        code = wait(child)
-        for t in pumps:
-            t.join(JOIN_S)
-        return die_like(-code) if code < 0 else code
-    if args.mode and not sys.stdin.isatty():
-        import shutil  # noqa: PLC0415  (startup time, see the imports)
-        try:
-            shutil.copyfileobj(sys.stdin.buffer, sys.stdout.buffer)
-        except BrokenPipeError:
-            import signal  # noqa: PLC0415  (startup time, see the imports)
-            return die_like(signal.SIGPIPE)
-    return 0
-
-
-def run_reported(args, session):
-    """Does the work and reports it to the task file of this session. Returns the exit status."""
-    if args.mode and args.command is None and sys.stdin.isatty():
-        warn('a pipe mode needs input or "-- COMMAND"')
-        return 0
-    store = Store(os.path.join(base_dir(), clean_name(session)), args.name or default_name(args.command))
+def run(args, store):
+    """Does the work, and reports it to `store`. Returns the exit status."""
     if args.mode is None:
-        if args.value is None:  # only -t: start the bar at 0
-            args.value = '0/1'
         report(store, args)
+        return 0
+    if args.command is None and sys.stdin.isatty():
+        warn('a pipe mode needs input or "-- COMMAND"')
         return 0
     meter = Meter(store, args)
     return pipe_stdin(meter) if args.command is None else pipe_command(meter, args.command)
@@ -598,8 +605,10 @@ def main(argv):
     if error:
         warn(error)
     session = os.environ.get('CLAUDE_CODE_SESSION_ID')
-    # A usage error, or no session, still does the work: the script must not break.
-    return run_plain(args) if error or not session else run_reported(args, session)
+    # A usage error, or no session, still does the work, with nothing reported: the script must not break.
+    if error or not session:
+        return run(args, NullStore())
+    return run(args, Store(os.path.join(base_dir(), clean_name(session)), args.name or default_name(args.command)))
 
 
 if __name__ == '__main__':

@@ -52,7 +52,7 @@ function run(bar: Bar, pid: number | null, u: Update, at: number): Bar {
   const dd = u.done - bar.done
   const dt = at - bar.progressAt
   // An update with no new progress (a detail, a repeat) keeps the rate and the estimate.
-  if (dd <= 0 || dt <= 0) return { ...next, done: bar.done }
+  if (dd === 0 || dt <= 0) return next
 
   const sample = dd / dt
   const rate = bar.rate === null ? sample : SMOOTHING * sample + (1 - SMOOTHING) * bar.rate
@@ -69,7 +69,7 @@ export function stop(bar: Bar, now: number): Bar {
   return { ...bar, state: isDone ? 'complete' : 'stopped', endedAt: now, eta: isDone ? 0 : null }
 }
 
-/** Returns true when the plugin removes the bar at `now`. */
+/** Returns true when the plugin removes the bar at `now`. `isAlive` is false for a bar with no owner. */
 export function isExpired(bar: Bar, now: number, isAlive: boolean): boolean {
   switch (bar.state) {
     case 'complete':
@@ -79,6 +79,6 @@ export function isExpired(bar: Bar, now: number, isAlive: boolean): boolean {
       return now - (bar.endedAt ?? now) > FAIL_HOLD_MS
     case 'run':
       // A live process keeps its bar. A bar with no process expires after 10 minutes.
-      return !(bar.pid !== null && isAlive) && now - bar.updatedAt > EXPIRE_MS
+      return !isAlive && now - bar.updatedAt > EXPIRE_MS
   }
 }
