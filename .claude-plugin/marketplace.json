@@ -1,0 +1,15 @@
+{
+  "name": "simple-progress-bars",
+  "description": "Simple Progress Bars: progress bars with time estimates for long scripts in Claude Code.",
+  "owner": {
+    "name": "Max Hunter",
+    "url": "https://github.com/mhgar"
+  },
+  "plugins": [
+    {
+      "name": "simple-progress-bars",
+      "source": "./plugins/simple-progress-bars",
+      "description": "Progress bars with time estimates for long scripts that Claude runs."
+    }
+  ]
+}

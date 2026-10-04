@@ -1,0 +1,418 @@
+#!/usr/bin/env python3
+"""progress: report script progress to the Claude Code progress bar.
+
+Usage:
+  progress [-n NAME] [-t TOTAL] VALUE [DETAIL...]
+  progress [-n NAME] (-l | -b | -p) [-t TOTAL] [-- COMMAND ARGS...]
+
+VALUE forms:
+  17/240          17 of 240 done. Sizes work too: 1.5G/4G, 300MiB/2GiB
+  42%             percent done
+  +1, +5          add to the count. Safe from parallel workers
+  Scanning disk   text with no number: a bar with no total
+  done [MSG]      the task is complete
+  fail [MSG]      the task failed. The bar turns red
+  clear           remove the bar now
+
+Options:
+  -n NAME     task name. Default: the name of the calling script
+  -t TOTAL    set the total. Use it alone, or with +N or -l/-b
+  -l          pipe mode: count lines of input
+  -b          pipe mode: count bytes of input
+  -p          pipe mode: read N/M or N% from the output (tqdm, pv, rsync)
+  -h, --help  show this reference
+
+Pipe modes read standard input, or run COMMAND after "--". They pass all
+output through without change. With "--", they report done or fail from the
+exit status of COMMAND and exit with that status.
+
+Examples:
+  for f in *.mkv; do progress -n convert "$((++i))/$n" "$f"; ffmpeg ...; done
+  progress -n convert done
+  find / -name '*.log' | progress -n scan -l -t 5000 > logs.txt
+  progress -n train -p -- python train.py
+  progress -n thumbs -t 500; ls *.jpg | xargs -P8 -I{} sh -c 'mk {} && progress -n thumbs +1'
+
+Behavior:
+  - If CLAUDE_CODE_SESSION_ID is not set, progress does nothing. Scripts stay
+    portable outside Claude Code.
+  - progress never fails a script. It prints warnings to stderr and exits 0,
+    except with "--", where it exits with the status of COMMAND.
+  - Each call starts a process (about 15 ms). In fast loops, report every Nth
+    item, or use a pipe mode, which updates at most 5 times per second.
+  - If the calling script exits before "done", the bar shows "stopped".
+
+Files: <runtime dir>/claude-progress/<session-id>/<name>, one JSON object per
+task. The runtime dir is $XDG_RUNTIME_DIR, else $TMPDIR, else /tmp. The Simple
+Progress Bars plugin reads these files. PROGRESS_DIR overrides the
+claude-progress directory.
+"""
+
+import json
+import os
+import re
+import sys
+
+VERSION = 1
+STARTED = False  # True once COMMAND runs, so a late error never runs it twice
+THROTTLE_S = 0.2
+UNITS = {'': 1, 'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4, 'P': 1024**5}
+SIZE = r'(\d+(?:[.,]\d+)*)\s*([KMGTP]?)(i?B)?'
+RE_COUNT = re.compile(rf'^{SIZE}\s*/\s*{SIZE}$', re.I)
+RE_PERCENT = re.compile(r'^(\d+(?:\.\d+)?)\s*%$')
+RE_INCREMENT = re.compile(r'^\+(\d+(?:\.\d+)?)$')
+# For pipe mode: the last "N/M" or "N%" in a chunk of output.
+RE_OUT_COUNT = re.compile(rf'(?<![\d/.]){SIZE}\s*/\s*{SIZE}(?![\d/])', re.I)
+RE_OUT_PERCENT = re.compile(r'(?<![\d.])(\d{1,3}(?:\.\d+)?)\s*%')
+
+
+def warn(msg):
+    print(f'progress: {msg}', file=sys.stderr)
+
+
+def size(num, prefix, suffix):
+    value = float(num.replace(',', ''))
+    return value * UNITS[prefix.upper()], bool(prefix or suffix)
+
+
+def task_dir():
+    # Keep in step with the mod: PROGRESS_DIR, else a per-user runtime
+    # directory (XDG_RUNTIME_DIR on Linux, TMPDIR on macOS), else /tmp.
+    base = os.environ.get('PROGRESS_DIR') or os.path.join(
+        os.environ.get('XDG_RUNTIME_DIR') or os.environ.get('TMPDIR') or '/tmp',
+        'claude-progress')
+    return os.path.join(base, os.environ['CLAUDE_CODE_SESSION_ID'])
+
+
+SHELLS = {'bash', 'sh', 'zsh', 'dash', 'fish', 'python', 'python3', 'node', 'ruby', 'perl', 'uv', 'env'}
+
+
+def name_from_argv(argv):
+    """Returns a task name from a command line, or None."""
+    words = [os.path.basename(a) for a in argv if a]
+    if not words:
+        return None
+    first = words[0]
+    if re.sub(r'[\d.]+$', '', first) in SHELLS:
+        rest = [w for w in words[1:] if not w.startswith('-')]
+        if '-c' in argv[1:3] or not rest:
+            return None
+        first = rest[0]
+    return os.path.splitext(first)[0] or None
+
+
+def default_name(command):
+    if command:
+        return name_from_argv(command) or 'task'
+    try:
+        with open(f'/proc/{os.getppid()}/cmdline', 'rb') as f:
+            argv = [a.decode(errors='replace') for a in f.read().split(b'\0')]
+    except OSError:
+        # No /proc (macOS): ask ps. Its output splits on spaces, which is
+        # enough for a name.
+        import subprocess
+        try:
+            out = subprocess.run(['ps', '-o', 'args=', '-p', str(os.getppid())],
+                                 capture_output=True, text=True, timeout=2).stdout
+        except (OSError, subprocess.SubprocessError):
+            return 'task'
+        argv = out.split()
+    return name_from_argv(argv) or 'task'
+
+
+def clean_name(name):
+    name = re.sub(r'[/\0]', '-', name).strip().lstrip('.')
+    return name[:80] or 'task'
+
+
+class Task:
+    def __init__(self, name):
+        self.path = os.path.join(task_dir(), clean_name(name))
+
+    def read(self):
+        try:
+            with open(self.path) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def write(self, data):
+        os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
+        tmp = f'{self.path}.{os.getpid()}.tmp'
+        with open(tmp, 'w') as f:
+            json.dump({'v': VERSION, **data}, f)
+        os.replace(tmp, self.path)
+
+    def update(self, fn):
+        """Reads, changes, and writes the file under a lock."""
+        import fcntl
+        os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
+        with open(f'{self.path}.lock', 'w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self.write(fn(self.read()))
+
+    def clear(self):
+        for p in (self.path, f'{self.path}.lock'):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
+def base_state(prev, pid):
+    # A worker that adds +N keeps the pid of the script that set the total.
+    return {
+        'state': 'run', 'done': prev.get('done', 0), 'total': prev.get('total'),
+        'unit': prev.get('unit', ''), 'detail': prev.get('detail', ''),
+        'pid': prev.get('pid') or pid,
+    }
+
+
+def parse_total(text):
+    m = re.fullmatch(SIZE, text.strip(), re.I)
+    if not m:
+        raise ValueError(f'bad total: {text!r}')
+    return size(*m.groups(default=''))
+
+
+def report(task, opts, value, detail):
+    pid = os.getppid()
+    word = value.lower()
+
+    if word == 'clear':
+        task.clear()
+        return
+    if word in ('done', 'fail', 'failed'):
+        state = 'done' if word == 'done' else 'fail'
+        task.update(lambda p: {**base_state(p, pid), 'state': state, 'msg': detail})
+        return
+
+    m = RE_INCREMENT.match(value)
+    if m:
+        step = float(m.group(1))
+
+        def add(p):
+            s = base_state(p, pid)
+            if opts.total is not None:
+                s['total'], s['unit'] = opts.total[0], 'B' if opts.total[1] else s['unit']
+            s['done'] = s['done'] + step
+            if detail:
+                s['detail'] = detail
+            return s
+        task.update(add)
+        return
+
+    s = {'state': 'run', 'detail': detail, 'pid': pid, 'unit': '', 'done': 0, 'total': None}
+    m = RE_COUNT.match(value)
+    m2 = RE_PERCENT.match(value)
+    if m:
+        done, d_unit = size(*m.group(1, 2, 3))
+        total, t_unit = size(*m.group(4, 5, 6))
+        s.update(done=done, total=total, unit='B' if d_unit or t_unit else '')
+    elif m2:
+        s.update(done=float(m2.group(1)), total=100, unit='%')
+    else:
+        # Text only: no total. Keep a total set before with -t.
+        s.update(detail=' '.join(filter(None, [value, detail])))
+    if opts.total is not None:
+        s['total'] = opts.total[0]
+        if opts.total[1]:
+            s['unit'] = 'B'
+    task.update(lambda _: s)
+
+
+def pipe(task, opts, command):
+    """Passes output through and reports progress from it."""
+    import threading
+    import time
+
+    lock = threading.Lock()
+    state = {'done': 0.0, 'total': None, 'unit': '', 'last': 0.0}
+    if opts.total is not None:
+        state['total'] = opts.total[0]
+    if opts.mode == 'bytes':
+        state['unit'] = 'B'
+    elif opts.mode == 'parse':
+        state['unit'] = ''
+
+    def flush(force=False):
+        now = time.monotonic()
+        if not force and now - state['last'] < THROTTLE_S:
+            return
+        state['last'] = now
+        try:
+            task.write({'state': 'run', 'done': state['done'], 'total': state['total'],
+                        'unit': state['unit'], 'detail': opts.detail, 'pid': os.getpid()})
+        except OSError as e:
+            warn(e)
+
+    def scan(text):
+        found = None
+        for m in RE_OUT_COUNT.finditer(text):
+            done, du = size(*m.group(1, 2, 3))
+            total, tu = size(*m.group(4, 5, 6))
+            if 0 <= done <= total and total > 0:
+                found = (done, total, 'B' if du or tu else '')
+        if found is None:
+            for m in RE_OUT_PERCENT.finditer(text):
+                p = float(m.group(1))
+                if p <= 100:
+                    found = (p, 100.0, '%')
+        if found:
+            state['done'], state['total'], state['unit'] = found
+
+    def pump(src, dst):
+        tail = ''
+        while True:
+            chunk = src.read1(65536) if hasattr(src, 'read1') else src.read(65536)
+            if not chunk:
+                break
+            try:
+                dst.write(chunk)
+                dst.flush()
+            except BrokenPipeError:
+                dst = None
+            except (OSError, ValueError):
+                pass
+            with lock:
+                if opts.mode == 'lines':
+                    state['done'] += chunk.count(b'\n')
+                elif opts.mode == 'bytes':
+                    state['done'] += len(chunk)
+                else:
+                    text = tail + chunk.decode(errors='replace')
+                    tail = text[-200:]
+                    scan(text)
+                flush()
+            if dst is None and command is None:
+                break
+
+    flush(force=True)
+    if command is None:
+        try:
+            pump(sys.stdin.buffer, sys.stdout.buffer)
+        except KeyboardInterrupt:
+            return 130
+        with lock:
+            task.write({'state': 'done', 'done': state['done'], 'total': state['total'],
+                        'unit': state['unit'], 'detail': opts.detail, 'pid': os.getpid()})
+        return 0
+
+    import subprocess
+    global STARTED
+    STARTED = True
+    try:
+        child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as e:
+        warn(e)
+        task.write({'state': 'fail', 'msg': str(e), 'done': 0, 'total': None, 'unit': '',
+                    'detail': '', 'pid': os.getpid()})
+        return 127
+    threads = [
+        threading.Thread(target=pump, args=(child.stdout, sys.stdout.buffer), daemon=True),
+        threading.Thread(target=pump, args=(child.stderr, sys.stderr.buffer), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+    try:
+        code = child.wait()
+    except KeyboardInterrupt:
+        child.terminate()
+        code = child.wait()
+    for t in threads:
+        t.join()
+    with lock:
+        final = {'state': 'done' if code == 0 else 'fail', 'done': state['done'],
+                 'total': state['total'], 'unit': state['unit'], 'detail': opts.detail,
+                 'pid': os.getpid(), 'msg': '' if code == 0 else f'exit {code}'}
+        task.write(final)
+    return code
+
+
+class Opts:
+    name = None
+    total = None
+    mode = None
+    detail = ''
+
+
+def main(argv):
+    if not argv or argv[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return 0
+
+    opts = Opts()
+    command = None
+    words = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == '--':
+            command = argv[i + 1:]
+            break
+        if a in ('-n', '--name') and i + 1 < len(argv):
+            opts.name = argv[i + 1]
+            i += 2
+            continue
+        if a in ('-t', '--total') and i + 1 < len(argv):
+            opts.total = parse_total(argv[i + 1])
+            i += 2
+            continue
+        if a in ('-l', '--lines'):
+            opts.mode = 'lines'
+        elif a in ('-b', '--bytes'):
+            opts.mode = 'bytes'
+        elif a in ('-p', '--parse'):
+            opts.mode = 'parse'
+        elif a in ('-h', '--help'):
+            print(__doc__.strip())
+            return 0
+        else:
+            words.append(a)
+        i += 1
+
+    if command is not None and opts.mode is None:
+        opts.mode = 'parse'
+    if command == []:
+        raise ValueError('no command after --')
+
+    if 'CLAUDE_CODE_SESSION_ID' not in os.environ:
+        # Outside Claude Code: do the work, report nothing.
+        if command:
+            import subprocess
+            global STARTED
+            STARTED = True
+            return subprocess.call(command)
+        if opts.mode:
+            import shutil
+            shutil.copyfileobj(sys.stdin.buffer, sys.stdout.buffer)
+        return 0
+
+    task = Task(opts.name or default_name(command))
+    if opts.mode:
+        opts.detail = ' '.join(words)
+        return pipe(task, opts, command)
+    if not words:
+        if opts.total is None:
+            raise ValueError('nothing to report. See progress --help')
+        # Only a total: start the bar at 0.
+        report(task, opts, '0/1', '')
+        return 0
+    report(task, opts, words[0], ' '.join(words[1:]))
+    return 0
+
+
+if __name__ == '__main__':
+    has_command = '--' in sys.argv[1:]
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception as e:  # never break the calling script
+        warn(e)
+        if has_command and not STARTED:
+            # The command did not run. Run it plain so the script still works.
+            import subprocess
+            cmd = sys.argv[sys.argv.index('--') + 1:]
+            sys.exit(subprocess.call(cmd) if cmd else 2)
+        sys.exit(0)

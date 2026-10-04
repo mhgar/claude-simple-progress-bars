@@ -1,0 +1,37 @@
+{
+  "name": "simple-progress-bars",
+  "displayName": "Simple Progress Bars",
+  "version": "0.1.0",
+  "description": "Progress bars with time estimates for long scripts that Claude runs. Scripts report with one command: progress 17/240.",
+  "author": { "name": "Max Hunter", "url": "https://github.com/mhgar" },
+  "homepage": "https://github.com/mhgar/simple-progress-bars",
+  "repository": "https://github.com/mhgar/simple-progress-bars",
+  "license": "MIT",
+  "keywords": ["progress", "progress-bar", "eta", "tqdm", "scripts", "mod", "function-hooks"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "position": {
+      "type": "string",
+      "title": "Bar position",
+      "description": "below: under the mode line (default). above: in the band above the prompt.",
+      "default": "below",
+      "options": ["below", "above"]
+    },
+    "maxRows": {
+      "type": "number",
+      "title": "Most rows of bars",
+      "description": "Tasks that do not fit show as +N.",
+      "default": 3,
+      "min": 1,
+      "max": 6
+    },
+    "minSeconds": {
+      "type": "number",
+      "title": "Shortest script for a bar (seconds)",
+      "description": "Claude adds progress reports only to scripts it expects to run at least this long.",
+      "default": 30,
+      "min": 5,
+      "max": 3600
+    }
+  }
+}
