@@ -93,8 +93,8 @@ Run `/plugin configure simple-progress-bars@simple-progress-bars` to change thes
 
 The plugin has two parts: the `claude-progress` command, and a set of hooks inside Claude Code.
 
-1. Each `claude-progress` call writes one line to a small file: `~/.claude/progress/<session id>/<task name>`. Claude Code gives every Bash call the session ID, so each session has its own folder.
-2. The plugin reads that folder four times a second, and draws a bar for each file.
+1. Each `claude-progress` call reads the session ID from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in every Bash call. It writes one line to `~/.claude/progress/<session id>/<task name>`.
+2. The plugin reads that session's folder four times a second, and draws a bar for each file.
 3. The plugin also watches Claude's Bash calls. When the call that ran a script ends, the bars of that script end too. A bar that did not reach its total shows `stopped`.
 
 The plugin also adds a short section to Claude's system prompt. That section tells Claude when and how to use `claude-progress`.
