@@ -1,16 +1,10 @@
 # Simple Progress Bars
 
+![Progress bars above the Claude Code prompt: two running tasks with time estimates, one with a transfer size, a stalled task, and a failed upload in red](plugins/simple-progress-bars/assets/screenshot.png)
+
 Progress bars for the long scripts that Claude Code runs.
 
 When Claude runs a script that takes a while, such as a batch conversion, a download, or a test suite, you normally see nothing until it ends. With this plugin, the script reports its progress, and Claude Code shows a live bar for each task above the prompt, with a count, a percent and a time estimate.
-
-```
-  convert-videos clip_018.mkv ━━━─────────── 18/90  20%  0:19  ~1:12 left │ download-ubun… ━━━━━━╸───────── 819M/2.0G  40%  46M/s  0:19  ~0:27 left
-  train-model ━━━━━━━━━━━━━━━━━━──────────── 30/50  60%  0:19  ~0:12 left │ flaky-script ━━━━━━━━━━━━╸────────────────── 40/100  40%  0:18  stopped
-  upload-to-nas server return… ━━━━━━━────────── 25/60  41%  0:18  failed │ scan-library Scanning libr… ──━━━━━━──────────────────────── 1234  0:19
-──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯ 
-```
 
 You do not need to do anything. The plugin teaches Claude to add progress reports to scripts that run longer than about 30 seconds. The updates go straight to the screen, so they cost no tokens.
 
