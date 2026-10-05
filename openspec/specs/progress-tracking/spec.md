@@ -33,22 +33,22 @@ The rate MUST be an exponential moving average with the weight 0.3 for the newes
 - **WHEN** four updates repeat the count 2 of 100 in one second, and then the count 3 arrives
 - **THEN** the rate stays 1 item a second, not 5
 
-### Requirement: End with the Bash call
-The plugin MUST note the start and the end of each foreground Bash call. A running bar MUST end when a call that it started in has ended, no running call started before it, and it got no update after that call ended. It MUST end done at its total, and stopped in all other cases. A stopped bar that gets an update MUST resume with its start time.
+### Requirement: End with the shell call
+The plugin MUST note the start and the end of each foreground Bash or PowerShell call. A running bar MUST end when a call that it started in has ended, no running call started before it, and it got no update after that call ended. It MUST end done at its total, and stopped in all other cases. A stopped bar that gets an update MUST resume with its start time.
 
 #### Scenario: Two calls at the same time
 - **WHEN** a bar starts while calls A and B both run, and B ends first
 - **THEN** the bar keeps running until A ends
 
 ### Requirement: Total reached while running
-A bar that reaches its total MUST stay running until `done`, `fail`, or the end of its Bash call.
+A bar that reaches its total MUST stay running until `done`, `fail`, or the end of its shell call.
 
 #### Scenario: The last item starts
 - **WHEN** a script reports 3 of 3 before it works on the third item
 - **THEN** the bar shows `finishing…`
 
 ### Requirement: Expiry
-A done bar MUST go 2 seconds after it ends. A failed or stopped bar MUST go after 30 seconds. A running bar MUST stay while a Bash call can own it, and else go 10 minutes after its last update. A gone bar MUST stay hidden until its file changes, and a file that is deleted MUST lose its bar at the next read.
+A done bar MUST go 2 seconds after it ends. A failed or stopped bar MUST go after 30 seconds. A running bar MUST stay while a shell call can own it, and else go 10 minutes after its last update. A gone bar MUST stay hidden until its file changes, and a file that is deleted MUST lose its bar at the next read.
 
 #### Scenario: A new run in an old file
 - **WHEN** a bar went, and its file then gets a new line

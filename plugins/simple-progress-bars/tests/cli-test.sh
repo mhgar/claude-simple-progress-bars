@@ -68,6 +68,8 @@ check "the default name is task" "1/2|" "$(lines task)"
 
 "$P" -n 'a/b/../c' 1/2
 check "a slash becomes a dash" "1/2|" "$(lines 'a-b-..-c')"
+"$P" -n 'win\path' 1/2
+check "a backslash becomes a dash" "1/2|" "$(lines 'win-path')"
 "$P" -n .hidden 1/2
 check "a name cannot start with a dot" "1/2|" "$(lines hidden)"
 "$P" -n "$(printf 'line\nbreak')" 1/2
@@ -150,12 +152,89 @@ check "a session with no owner goes after 7 days" no "$(exists "$BASE/orphan-old
 
 check "no temporary files are left" 0 "$(find "$BASE" -name '.*' ! -name .owner -type f | wc -l | tr -d ' ')"
 
-# --- Help, the shim, and the README
+# --- Help, the shims, and USAGE.md
 
 check "no arguments prints the help" yes "$("$P" | grep -q '^Usage:' && echo yes || echo no)"
 out=$(env -u CLAUDE_CODE_SESSION_ID PATH=/usr/bin:/bin bash -c ". \"$ROOT/shim.sh\"; claude-progress -n x 1/2; echo \$?")
 check "the shim makes the calls do nothing" 0 "$out"
-check "the README gives the same shim" yes "$(grep -qF -- "$(grep -v '^#' "$ROOT/shim.sh")" "$ROOT/../../README.md" && echo yes || echo no)"
+# in_usage FILE: prints yes when USAGE.md holds every line of a shim, the comment aside.
+in_usage() {
+  local line
+  while IFS= read -r line; do
+    grep -qF -- "$line" "$ROOT/USAGE.md" || { echo no; return; }
+  done < <(grep -v '^#' "$1")
+  echo yes
+}
+for shim in shim.sh shim.ps1 shim.py; do
+  check "USAGE.md gives $shim" yes "$(in_usage "$ROOT/$shim")"
+done
+
+# --- The PowerShell twin, where PowerShell is installed
+
+PS=$(command -v pwsh || command -v powershell.exe || command -v powershell || true)
+# native PATH: the form a Windows program takes. Elsewhere, the path as it is.
+native() { if [ -n "$IS_WINDOWS" ]; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
+if [ -n "$PS" ]; then
+  PS1=$(native "$ROOT/bin/claude-progress.ps1")
+  # report IMPL ARGS...: one call through the bash command or the PowerShell twin.
+  report() {
+    local impl=$1; shift
+    if [ "$impl" = sh ]; then "$P" "$@"; else "$PS" -NoProfile -ExecutionPolicy Bypass -File "$PS1" "$@"; fi
+  }
+  for impl in sh ps; do
+    export CLAUDE_CONFIG_DIR CLAUDE_CODE_SESSION_ID=twin
+    CLAUDE_CONFIG_DIR=$(native "$TMP/twin-$impl")
+    report $impl -n count 17/240 clip.mkv
+    report $impl -n count Scanning disk
+    report $impl -n count done
+    report $impl -n pct 42% halfway
+    report $impl -n failed fail "disk full"
+    report $impl -n workers -t 5
+    report $impl -n workers +1
+    report $impl -n workers +1
+    report $impl -n both -t 20 3/9
+    report $impl -n 'a\b/c' 1/2
+    report $impl -n .hidden 1/2
+    report $impl -n gone 1/2
+    report $impl -n gone clear
+    report $impl 1/2
+    report $impl -n words 1/4 cp -p -- file.txt
+  done
+  export CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=test-session
+  check "the PowerShell twin writes the same files" "" "$(diff -r --exclude=.owner "$TMP/twin-sh/progress/twin" "$TMP/twin-ps/progress/twin" 2>&1)"
+  check "the PowerShell twin leaves no temporary files" 0 "$(find "$TMP/twin-ps" -name '.*' ! -name .owner -type f | wc -l | tr -d ' ')"
+
+  out=$(CLAUDE_CODE_SESSION_ID=twin report ps -n x 2>&1; echo "exit $?")
+  check "the twin warns when there is nothing to report" "claude-progress: nothing to report. See claude-progress --help|exit 0" "$(printf '%s' "$out" | tr -d '\r' | tr '\n' '|')"
+  env -u CLAUDE_CODE_SESSION_ID "$PS" -NoProfile -ExecutionPolicy Bypass -File "$PS1" -n twin-nosession 1/2
+  check "the twin exits 0 with no session" 0 "$?"
+  check "the twin writes nothing with no session" no "$(exists "$D/twin-nosession")"
+
+  # The shim, as a .ps1 script uses it: values PowerShell reads as numbers are quoted.
+  shim=$(native "$ROOT/shim.ps1")
+  CLAUDE_PROGRESS_PS1=$PS1 "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n ps-shim 3/4 two words; claude-progress -n ps-shim '+1'"
+  check "the PowerShell shim passes every argument" "3/4 two words|+1|" "$(lines ps-shim)"
+  out=$(env -u CLAUDE_PROGRESS_PS1 "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n x 1/2; 'ok'" | tr -d '\r')
+  check "the PowerShell shim does nothing without the plugin" ok "$out"
+else
+  echo "skip: no PowerShell, so the PowerShell twin is not tested"
+fi
+
+# --- The Python shim, where Python is installed
+
+PY=$(command -v python3 || command -v python || true)
+if [ -n "$PY" ] && "$PY" -c 'import sys; sys.exit(0)' 2>/dev/null; then
+  script="$TMP/progress.py"
+  { cat "$ROOT/shim.py"; printf '%s\n' 'claude_progress("-n", "py-shim", "2/5", "a.wav")' 'print("ok")'; } > "$script"
+  # PATH with no claude-progress on it, such as one inside a Claude Code session with the plugin.
+  bare=$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r p; do [ -x "$p/claude-progress" ] || printf '%s:' "$p"; done)
+  out=$(PATH="$ROOT/bin:$bare" "$PY" "$(native "$script")" | tr -d '\r')
+  check "the Python shim reports through bash" "ok 2/5 a.wav|" "$out $(lines py-shim)"
+  out=$(PATH="$bare" "$PY" "$(native "$script")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
+  check "the Python shim does nothing without the command" "ok exit 0" "$(printf '%s' "$out" | tr '\n' ' ')"
+else
+  echo "skip: no Python, so the Python shim is not tested"
+fi
 
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]

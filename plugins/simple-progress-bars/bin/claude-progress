@@ -32,7 +32,8 @@ Options:
   -h, --help  show this reference
 
 The command reports nothing outside a Claude Code session, and it never fails
-a script: it always exits 0. Each call takes a few milliseconds.
+a script: it always exits 0. Each call starts a process, so report at most
+about once a second.
 
 Files: <dir>/<session id>/<name>, where <dir> is $CLAUDE_CONFIG_DIR/progress,
 or ~/.claude/progress. A session directory stays while its Claude Code process
@@ -128,7 +129,7 @@ case $session in '' | *[!A-Za-z0-9_-]*) exit 0 ;; esac
 if [ $# -eq 0 ] && [ -z "$total" ]; then warn 'nothing to report. See claude-progress --help'; exit 0; fi
 
 # A task name is a file name: no path, no line break, and no leading dot.
-name=${name//[\/$'\n'$'\r']/-}
+name=${name//[\/\\$'\n'$'\r']/-}
 while [ "${name#.}" != "$name" ]; do name=${name#.}; done
 name=${name:0:80}
 [ -n "$name" ] || name=task

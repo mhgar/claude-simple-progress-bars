@@ -17,11 +17,12 @@ const band = (overrides: { hasSurvey?: boolean; isWorking?: boolean } = {}) => (
 })
 
 /** A session whose progress directory holds `files`, by name. Returns the clock. */
-function world(on: On, files: Record<string, string>) {
+function world(on: On, files: Record<string, string>, { envSetFails = false } = {}) {
   const clock = mock.clock(on, { now: 10_000 })
   mock.env(on, { HOME: '/home/u' })
   on('session.start', ($, e) => Promise.resolve({ cwd: e.cwd }))
   on('session.id', () => Promise.resolve({ value: 's1' }) as never)
+  on('env.set', () => (envSetFails ? Promise.reject(new Error('refused')) : Promise.resolve({ value: undefined })) as never)
   on('fs.list', ($, e) => Promise.resolve({ value: posix(e.path) !== DIR ? [] : Object.keys(files).map(name => (
     { name, kind: 'file' as const, size: 1, mtimeMs: 10_000, isLink: false }
   )) }) as never)
@@ -61,5 +62,14 @@ describe('the band above the prompt', () => {
 
     const ui = await $.ui.mount(band({ hasSurvey: true }))
     expect(await ui.find({ type: 'Text', text: /convert/ })).toBeUndefined()
+  })
+
+  test('draws the bars even when CLAUDE_PROGRESS_PS1 cannot be set', async ($, on) => {
+    const clock = world(on, { convert: '17/240 clip.mkv\n' }, { envSetFails: true })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await clock.advance(300)
+
+    const ui = await $.ui.mount(band())
+    expect(await ui.find({ type: 'Text', text: /convert/ })).toBeDefined()
   })
 })

@@ -25,14 +25,12 @@ type Watch = {
   base: string | null
   /** The session directories of this process, newest last. Older ones keep their background tasks. */
   dirs: string[]
-  /** The foreground Bash calls that run, or ended in the last minute. */
+  /** The foreground Bash and PowerShell calls that run, or ended in the last minute. */
   calls: Call[]
   /** Expired task files, by key, with the modification time they had. A newer write shows them again. */
   hidden: Map<string, number>
   isBusy: boolean
   ticks: number
-  /** The text of shim.sh for the prompt, or null when its read failed. */
-  shim: string | null
 }
 
 /** Lists one session directory. Reads only the files that changed, and skips hidden ones. */
@@ -75,26 +73,38 @@ async function tick($: EngineInterface, w: Watch) {
 async function start($: EngineInterface, w: Watch) {
   // The same directory as the command: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/progress.
   // Windows has no HOME outside Git Bash, so USERPROFILE stands for it there.
-  const [configDir, home, profile, id, shim] = await Promise.all([
+  const [configDir, home, profile, id] = await Promise.all([
     $.env.get('CLAUDE_CONFIG_DIR'), $.env.get('HOME'), $.env.get('USERPROFILE'), $.session.id(),
-    $.fs.read(`${$.plugin.root}/shim.sh`).catch((error: unknown) => {
-      $.ui.log(`simple-progress-bars: shim.sh: ${String(error)}`, { to: 'debug' })
-      return null
-    }),
   ])
   const config = configDir || (home || profile ? `${home || profile}/.claude` : null)
-  w.shim = shim
-  if (config === null) return
-  w.base = `${config}/progress`
-  w.dirs = [`${w.base}/${id}`]
-  $.clock.every(TICK_MS, () => void tick($, w))
+  if (config !== null) {
+    w.base = `${config}/progress`
+    w.dirs = [`${w.base}/${id}`]
+    $.clock.every(TICK_MS, () => void tick($, w))
+  }
+  // PowerShell does not get the plugin's bin folder on its PATH. It finds the twin through this.
+  await $.env.set('CLAUDE_PROGRESS_PS1', `${$.plugin.root}/bin/claude-progress.ps1`).catch((error: unknown) => {
+    $.ui.log(`simple-progress-bars: CLAUDE_PROGRESS_PS1: ${String(error)}`, { to: 'debug' })
+  })
+}
+
+/** Runs one shell call. A foreground call is noted while it runs, so that its end can end its bars. */
+async function track<T>($: EngineInterface, w: Watch, isBackground: boolean | undefined, run: () => Promise<T>): Promise<T> {
+  if (isBackground) return run()
+  const call: Call = { start: await $.clock.now(), end: null }
+  w.calls.push(call)
+  try {
+    return await run()
+  } finally {
+    call.end = await $.clock.now()
+  }
 }
 
 export const register: Register = (on, options) => {
   const maxRows = typeof options.maxRows === 'number' ? Math.max(1, Math.round(options.maxRows)) : 3
   const minSeconds = typeof options.minSeconds === 'number' ? Math.max(1, options.minSeconds) : 30
   const w: Watch = {
-    base: null, dirs: [], calls: [], hidden: new Map(), isBusy: false, ticks: 0, shim: null,
+    base: null, dirs: [], calls: [], hidden: new Map(), isBusy: false, ticks: 0,
   }
 
   on('session.start', async ($, e, next) => {
@@ -103,21 +113,14 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // The end of a foreground Bash call ends the bars that only it can own.
-  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    if (e.run_in_background) return next(e)
-    const call: Call = { start: await $.clock.now(), end: null }
-    w.calls.push(call)
-    try {
-      return await next(e)
-    } finally {
-      call.end = await $.clock.now()
-    }
-  })
+  // The end of a foreground shell call ends the bars that only it can own.
+  on('tool.call', { tool: 'Bash' }, ($, e, next) => track($, w, e.run_in_background, () => next(e)))
+  on('tool.call', { tool: 'PowerShell' }, ($, e, next) => track($, w, e.run_in_background, () => next(e)))
 
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
-    const section = { id: 'simple-progress-bars:usage', text: promptSection(minSeconds, w.shim), scope: 'session' as const }
+    const text = promptSection(minSeconds, `${$.plugin.root}/USAGE.md`, e.tools.includes('PowerShell'))
+    const section = { id: 'simple-progress-bars:usage', text, scope: 'session' as const }
     return { sections: [...result.sections, section] }
   })
 

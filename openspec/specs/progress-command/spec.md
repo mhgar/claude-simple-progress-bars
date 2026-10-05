@@ -1,7 +1,7 @@
 # Progress Command Specification
 
 ## Purpose
-The `claude-progress` command lets a script report the progress of one task with a single call. It is a bash script that works on Linux, macOS, and Windows with Git Bash, and it needs no other runtime.
+The `claude-progress` command lets a script report the progress of one task with a single call. It is a bash script that works on Linux, macOS, and Windows with Git Bash, and it needs no other runtime. Its PowerShell twin, `claude-progress.ps1`, does the same for PowerShell.
 
 ## Requirements
 
@@ -13,7 +13,7 @@ Options (`-n NAME`, `-t TOTAL`, and their long forms) MUST come first. The first
 - **THEN** the detail of the task is `cp -p -- file.txt`
 
 ### Requirement: Task file
-Each call MUST write to `<config>/progress/<session id>/<name>`, where `<config>` is `$CLAUDE_CONFIG_DIR` or `~/.claude`, and the session ID comes from `CLAUDE_CODE_SESSION_ID`. The name MUST default to `task`, MUST turn `/`, CR, and LF into `-`, MUST lose leading dots, and MUST be at most 80 characters. Directories MUST have the mode 700 where the system has modes.
+Each call MUST write to `<config>/progress/<session id>/<name>`, where `<config>` is `$CLAUDE_CONFIG_DIR` or `~/.claude`, and the session ID comes from `CLAUDE_CODE_SESSION_ID`. The name MUST default to `task`, MUST turn `/`, ``, CR, and LF into `-`, MUST lose leading dots, and MUST be at most 80 characters. Directories MUST have the mode 700 where the system has modes.
 
 #### Scenario: A name with a path
 - **WHEN** a script runs `claude-progress -n 'a/b/../c' 1/2`
@@ -50,3 +50,10 @@ When a call creates a new session directory, it MUST check the other session dir
 #### Scenario: An append
 - **WHEN** a dead owner's directory is 2 days old, but a file in it got an append 10 minutes ago
 - **THEN** the directory stays
+
+### Requirement: PowerShell twin
+`bin/claude-progress.ps1` MUST take the same arguments as the bash command, and MUST write the same bytes to the same task files for the same calls: UTF-8 with no byte order mark, and LF line ends. It MUST follow the same rules for the session ID, names, owner records, old sessions, and exit status. The plugin MUST set `CLAUDE_PROGRESS_PS1` to its full path at the start of a session, and a failure to set it MUST NOT stop the bars.
+
+#### Scenario: The same calls
+- **WHEN** the same calls run through the bash command and through the twin, in two config directories
+- **THEN** the two session directories hold the same files, byte for byte, apart from `.owner`

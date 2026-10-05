@@ -19,7 +19,7 @@ claude plugin install simple-progress-bars@simple-progress-bars
 
 Then start a new Claude Code session. A session that was open before the install does not load the plugin.
 
-The plugin works on Linux, macOS and Windows. It needs no other software. On Windows, the command runs in Git Bash, which Claude Code already uses for its Bash tool.
+The plugin works on Linux, macOS and Windows. It needs no other software. On Windows, the command runs in Git Bash, which Claude Code already uses for its Bash tool, or in PowerShell.
 
 ## Usage
 
@@ -51,15 +51,19 @@ claude-progress -n convert done
 
 The command never breaks a script. It always exits with 0, and outside Claude Code it does nothing. Run `claude-progress --help` for the full reference.
 
-### Scripts that run elsewhere
+### Shells and languages
 
-Other machines do not have the `claude-progress` command. For a script that people may run outside Claude Code, add this line near the top. It turns the calls into no-ops when the command is missing:
+- **Bash:** `claude-progress` is on the PATH of Claude's Bash tool.
+- **PowerShell:** the plugin sets `CLAUDE_PROGRESS_PS1` to a PowerShell version of the command, which takes the same arguments: `& $env:CLAUDE_PROGRESS_PS1 -n convert "$i/$n"`.
+- **Python, Node and others:** a script calls the command through bash.
+
+Other machines do not have the command. So a script that people may run outside Claude Code needs a short shim near the top, which turns the calls into no-ops there. For a bash script:
 
 ```bash
 command -v claude-progress >/dev/null || claude-progress() { :; }
 ```
 
-Claude adds this line for you when it writes such a script.
+[`USAGE.md`](plugins/simple-progress-bars/USAGE.md) has the shim for each language, and the full rules. Claude reads it before it writes such a script, so you do not need to.
 
 ## Reading a bar
 
@@ -87,16 +91,16 @@ Run `/plugin configure simple-progress-bars@simple-progress-bars` to change thes
 
 The plugin has two parts: the `claude-progress` command, and a set of hooks inside Claude Code.
 
-1. Each `claude-progress` call reads the session ID from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in every Bash call. It writes one line to `~/.claude/progress/<session id>/<task name>`.
+1. Each `claude-progress` call reads the session ID from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in every shell call. It writes one line to `~/.claude/progress/<session id>/<task name>`.
 2. The plugin reads that session's folder four times a second, and draws a bar for each file.
-3. The plugin also watches Claude's Bash calls. When the call that ran a script ends, the bars of that script end too. A bar that did not reach its total shows `stopped`.
+3. The plugin also watches Claude's Bash and PowerShell calls. When the call that ran a script ends, the bars of that script end too. A bar that did not reach its total shows `stopped`.
 
-The plugin also adds a short section to Claude's system prompt. That section tells Claude when and how to use `claude-progress`.
+The plugin also adds a short section to Claude's system prompt. That section tells Claude when to use `claude-progress` and how to call it, and points it to `USAGE.md` for the rest. It also sets one environment variable, `CLAUDE_PROGRESS_PS1`, for PowerShell.
 
 ### What it touches
 
 - **Files:** the command writes only in `~/.claude/progress`, or in `$CLAUDE_CONFIG_DIR/progress` if you set that variable. It removes the folders of old sessions after their Claude Code process exits.
-- **Claude Code:** the plugin adds one section to the system prompt and draws the bars above the prompt. It does not change your commands, their output, or the transcript.
+- **Claude Code:** the plugin adds one section to the system prompt, sets `CLAUDE_PROGRESS_PS1`, and draws the bars above the prompt. It does not change your commands, their output, or the transcript.
 - **Network:** none. Nothing leaves your machine.
 
 ## Development
