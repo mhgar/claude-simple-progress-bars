@@ -6,7 +6,7 @@ Progress bars for the long scripts that Claude Code runs.
 
 When Claude runs a script that takes a while, such as a batch conversion, a download, or a test suite, you normally see nothing until it ends. With this plugin, the script reports its progress, and Claude Code shows a live bar for each task above the prompt, with a count, a percent and a time estimate.
 
-You do not need to do anything. The plugin teaches Claude to add progress reports to scripts that run longer than about 30 seconds. The updates go straight to the screen, so they cost no tokens.
+You do not need to do anything. The plugin teaches Claude to add progress reports to long work it runs, and to new scripts it writes for long jobs, such as a batch conversion or a migration. It asks before it adds them to your existing scripts, and it never adds them to library or app code, tests or CI. Say "show progress" and Claude reports progress on all the work it can measure. The updates go straight to the screen, so they cost no tokens.
 
 > **Early access.** This plugin uses Claude Code function hooks, which are an early-access feature. A Claude Code update can change them and break the plugin.
 
@@ -81,7 +81,7 @@ Run `/plugin configure simple-progress-bars@simple-progress-bars` to change thes
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `maxRows` | `3` | The most rows of bars to show |
-| `minSeconds` | `30` | Claude adds progress reports only to scripts it expects to run at least this long |
+| `minSeconds` | `30` | Claude adds progress reports only to work it expects to take at least this long |
 
 ## How it works
 

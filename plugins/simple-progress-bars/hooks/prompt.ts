@@ -1,7 +1,7 @@
 /** Returns the system prompt section that teaches Claude the command. */
 export function promptSection(minSeconds: number, shim: string | null): string {
   const portable = shim === null ? [] : [
-    'In a script file that people can run outside Claude Code, put these lines near the top, so the calls do nothing there:',
+    'The shim: in a script file that people can run outside Claude Code, put these lines near the top, so the calls do nothing there:',
     '```bash',
     shim.trim(),
     '```',
@@ -9,8 +9,15 @@ export function promptSection(minSeconds: number, shim: string | null): string {
   return [
     '# Progress bars for long scripts',
     '',
-    'This session shows progress bars in the Claude Code interface, through the `claude-progress` command on the PATH of the Bash tool. You can always use it.',
-    `Use it only when a script will run longer than about ${minSeconds} seconds and its work can be counted or measured (files, items, bytes, steps, percent). Do not use it for quick commands or for work with no measurable progress.`,
+    'This session shows progress bars in the Claude Code interface, through the `claude-progress` command on the PATH of the Bash tool.',
+    '',
+    `Use it for work that will take longer than about ${minSeconds} seconds and can be counted or measured (files, items, bytes, steps, percent):`,
+    '- Commands you run: add progress reports to such a script or loop without being asked.',
+    '- Script files you write: when a new standalone script does such work and a person runs it and waits for it (a batch conversion, a migration, a backfill, a bulk download), include progress reports and the shim below.',
+    '- Existing script files: always ask the user before you edit one to add reports, in one short question. Until they agree, report from the command you run around the script instead, for example a loop that runs it once for each item.',
+    'Do not use it for quick commands, for work with no measurable progress (one long build, one network call, a test runner with its own output), or in library or application code, services, tests, CI, unattended jobs, or code that already reports progress its own way.',
+    '',
+    'When the user asks to see progress ("show progress", "with a progress bar", "let me see how far it gets"), use it for all measurable work in that task, even work shorter than the limit above or with only a few coarse steps. The rule for existing script files still applies.',
     '',
     'Options come first, then one VALUE, then detail text. Always give a short task name with `-n`:',
     '- `claude-progress -n NAME 17/240 [detail]` for a count. Sizes work: `1.5G/4G`',
