@@ -1,2 +1,2 @@
 # Makes the calls do nothing where claude-progress is not installed.
-command -v claude-progress >/dev/null || claude-progress() { :; }
+claude-progress() { [ -n "${CLAUDE_PROGRESS_SH:-}" ] && bash "$CLAUDE_PROGRESS_SH" "$@"; return 0; }

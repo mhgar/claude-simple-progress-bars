@@ -3,7 +3,9 @@
 #
 # Each call writes a line to <dir>/<session id>/<task name>. The plugin reads the
 # lines in order. A new count or percent replaces the file, and every other report
-# appends a line, so the command needs no lock.
+# appends a line, so the command needs no lock. The plugin sets CLAUDE_PROGRESS_SH
+# to this file's path:
+#   bash "$CLAUDE_PROGRESS_SH" -n convert "$i/$n" "$file"
 
 usage() {
   cat <<'EOF'

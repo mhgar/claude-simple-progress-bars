@@ -18,7 +18,7 @@ graders:
   - name: has-shim
     type: regex
     target: { source: file, path: backup.sh }
-    pattern: 'command -v claude-progress'
+    pattern: 'CLAUDE_PROGRESS_SH'
   - name: does-not-ask-again
     type: tool_used
     tool: AskUserQuestion

@@ -38,7 +38,7 @@ Claude writes the progress calls for you. You can also use the `claude-progress`
 
 `-n` gives the task its name. Each name gets its own bar.
 
-For example:
+For example, in a bash script with the shim below:
 
 ```bash
 n=$(ls *.mkv | wc -l); i=0
@@ -53,15 +53,15 @@ The command never breaks a script. It always exits with 0, and outside Claude Co
 
 ### Shells and languages
 
-- **Bash:** `claude-progress` is on the PATH of Claude's Bash tool.
+- **Bash:** the plugin sets `CLAUDE_PROGRESS_SH` to the bash command. A command runs it as `bash "$CLAUDE_PROGRESS_SH" -n convert "$i/$n"`. The plugin puts nothing on the `PATH`.
 - **PowerShell:** the plugin sets `CLAUDE_PROGRESS_PS1` to a PowerShell version of the command, which takes the same arguments: `& $env:CLAUDE_PROGRESS_PS1 -n convert "$i/$n"`.
 - **Python and Node:** `claude_progress.py` and `claude-progress.js` write the progress file themselves, with no bash. The plugin sets `CLAUDE_PROGRESS_DIR` to the `scripts` folder that holds them.
 - **Other languages:** a script calls the command through bash.
 
-Other machines do not have the command. So a script that people may run outside Claude Code needs a short shim near the top, which turns the calls into no-ops there. For a bash script:
+A script calls the command through a short shim near the top. In Claude Code, the shim runs the command. Outside Claude Code, it turns the calls into no-ops. For a bash script:
 
 ```bash
-command -v claude-progress >/dev/null || claude-progress() { :; }
+claude-progress() { [ -n "${CLAUDE_PROGRESS_SH:-}" ] && bash "$CLAUDE_PROGRESS_SH" "$@"; return 0; }
 ```
 
 [`USAGE.md`](plugins/simple-progress-bars/USAGE.md) has the shim for each language, and the full rules. Claude reads it before it writes such a script, so you do not need to.
@@ -96,7 +96,7 @@ The plugin has two parts: the `claude-progress` command, and a set of hooks insi
 2. The plugin reads that session's folder four times a second, and draws a bar for each file.
 3. The plugin also watches Claude's Bash and PowerShell calls. When the call that ran a script ends, the bars of that script end too. A bar that did not reach its total shows `stopped`.
 
-The plugin also adds a short section to Claude's system prompt. That section tells Claude when to use `claude-progress` and how to call it, and points it to `USAGE.md` for the rest. It also sets two environment variables: `CLAUDE_PROGRESS_DIR`, the folder of the command and its versions for other languages, and `CLAUDE_PROGRESS_PS1`, the PowerShell version.
+The plugin also adds a short section to Claude's system prompt. That section tells Claude when to use `claude-progress` and how to call it, and points it to `USAGE.md` for the rest. It also sets three environment variables: `CLAUDE_PROGRESS_SH`, the bash command, `CLAUDE_PROGRESS_DIR`, the folder of the command and its versions for other languages, and `CLAUDE_PROGRESS_PS1`, the PowerShell version.
 
 ### What it touches
 

@@ -82,11 +82,12 @@ async function start($: EngineInterface, w: Watch) {
     w.dirs = [`${w.base}/${id}`]
     $.clock.every(TICK_MS, () => void tick($, w))
   }
-  // The twins live in scripts/, off every PATH. PowerShell, Python and Node scripts find them through these.
+  // The command and its twins live in scripts/, off every PATH. Shells and scripts find them through these.
   const fail = (name: string) => (error: unknown) => {
     $.ui.log(`simple-progress-bars: ${name}: ${String(error)}`, { to: 'debug' })
   }
   await Promise.all([
+    $.env.set('CLAUDE_PROGRESS_SH', `${$.plugin.root}/scripts/claude-progress.sh`).catch(fail('CLAUDE_PROGRESS_SH')),
     $.env.set('CLAUDE_PROGRESS_DIR', `${$.plugin.root}/scripts`).catch(fail('CLAUDE_PROGRESS_DIR')),
     $.env.set('CLAUDE_PROGRESS_PS1', `${$.plugin.root}/scripts/claude-progress.ps1`).catch(fail('CLAUDE_PROGRESS_PS1')),
   ])

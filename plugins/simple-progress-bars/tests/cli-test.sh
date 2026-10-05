@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Tests for bin/claude-progress, on Linux, macOS, and Git Bash on Windows.
+# Tests for scripts/claude-progress.sh, on Linux, macOS, and Git Bash on Windows.
 # Run: tests/cli-test.sh. The checks write only to a temporary directory.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-P="$ROOT/bin/claude-progress"
+P="$ROOT/scripts/claude-progress.sh"
 TMP=$(mktemp -d)
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 export CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=test-session
@@ -155,8 +155,10 @@ check "no temporary files are left" 0 "$(find "$BASE" -name '.*' ! -name .owner 
 # --- Help, the shims, and USAGE.md
 
 check "no arguments prints the help" yes "$("$P" | grep -q '^Usage:' && echo yes || echo no)"
-out=$(env -u CLAUDE_CODE_SESSION_ID PATH=/usr/bin:/bin bash -c ". \"$ROOT/shim.sh\"; claude-progress -n x 1/2; echo \$?")
+out=$(env -u CLAUDE_PROGRESS_SH bash -c "set -eu; . \"$ROOT/shim.sh\"; claude-progress -n x 1/2; echo \$?")
 check "the shim makes the calls do nothing" 0 "$out"
+CLAUDE_PROGRESS_SH=$P bash -c ". \"$ROOT/shim.sh\"; claude-progress -n sh-shim 3/4 two words; claude-progress -n sh-shim +1"
+check "the bash shim passes every argument" "3/4 two words|+1|" "$(lines sh-shim)"
 # in_usage FILE: prints yes when USAGE.md holds every line of a shim, the comment aside.
 in_usage() {
   local line

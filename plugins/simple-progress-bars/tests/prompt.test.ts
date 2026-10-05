@@ -21,6 +21,10 @@ describe('promptSection', () => {
     expect(promptSection(30, USAGE, false)).toContain('When the user asks to see progress')
   })
 
+  test('runs the bash command through CLAUDE_PROGRESS_SH', () => {
+    expect(promptSection(30, USAGE, false)).toContain('bash "$CLAUDE_PROGRESS_SH" -n NAME 17/240')
+  })
+
   test('limits the rate, and sends long jobs to the background', () => {
     const text = promptSection(30, USAGE, false)
     expect(text).toContain('at most about once a second')

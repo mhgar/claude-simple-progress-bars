@@ -6,7 +6,7 @@ The plugin teaches Claude when and how to report progress. A short section in th
 ## Requirements
 
 ### Requirement: Prompt section
-The plugin MUST add the section `simple-progress-bars:usage` at the end of the system prompt of each request. The section MUST name the command and its main forms. It MUST tell Claude to use it for work that runs longer than about `minSeconds` seconds (default 30, from 5 to 3600) and has measurable work, in three cases: in commands Claude runs, without being asked; in new standalone script files that a person runs and waits for; and in existing script files only after the user agrees, which Claude MUST ask first unless the user already asked for progress in that file. It MUST tell Claude not to use it in library or application code, services, tests, CI, unattended jobs, or code that already reports progress. When the user asks to see progress, the section MUST tell Claude to use it for all measurable work in that task, whatever its length, and still ask before it edits an existing script file. It MUST tell Claude to report at most about once a second, and to run a job that may outlast the tool timeout in the background.
+The plugin MUST add the section `simple-progress-bars:usage` at the end of the system prompt of each request. The section MUST name the command and its main forms, and tell Claude to run it in the Bash tool as `bash "$CLAUDE_PROGRESS_SH"`. It MUST tell Claude to use it for work that runs longer than about `minSeconds` seconds (default 30, from 5 to 3600) and has measurable work, in three cases: in commands Claude runs, without being asked; in new standalone script files that a person runs and waits for; and in existing script files only after the user agrees, which Claude MUST ask first unless the user already asked for progress in that file. It MUST tell Claude not to use it in library or application code, services, tests, CI, unattended jobs, or code that already reports progress. When the user asks to see progress, the section MUST tell Claude to use it for all measurable work in that task, whatever its length, and still ask before it edits an existing script file. It MUST tell Claude to report at most about once a second, and to run a job that may outlast the tool timeout in the background.
 
 #### Scenario: A custom threshold
 - **WHEN** the setting `minSeconds` is 90
@@ -35,7 +35,7 @@ When the request offers the PowerShell tool, the section MUST tell Claude to cal
 - **THEN** the section does not name `CLAUDE_PROGRESS_PS1`
 
 ### Requirement: Shims
-`shim.sh`, `shim.ps1`, `shim.py`, `shim.js` and `shim.mjs` MUST each make the calls of a script in that language do nothing where the plugin is not installed, and exit 0. `USAGE.md` MUST hold every line of each. The Python and Node shims MUST load their twins from `CLAUDE_PROGRESS_DIR`, and never run the command by name.
+`shim.sh`, `shim.ps1`, `shim.py`, `shim.js` and `shim.mjs` MUST each make the calls of a script in that language do nothing where the plugin is not installed, and exit 0. `USAGE.md` MUST hold every line of each. The bash shim MUST run the command through `CLAUDE_PROGRESS_SH`. The Python and Node shims MUST load their twins from `CLAUDE_PROGRESS_DIR`, and never run the command by name.
 
 #### Scenario: Outside Claude Code
 - **WHEN** a script with a shim runs `claude-progress -n x 1/2` where the command is not installed

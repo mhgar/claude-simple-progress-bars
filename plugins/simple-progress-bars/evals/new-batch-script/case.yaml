@@ -16,7 +16,7 @@ graders:
   - name: has-shim
     type: regex
     target: { source: file, path: convert.sh }
-    pattern: 'command -v claude-progress'
+    pattern: 'CLAUDE_PROGRESS_SH'
   - name: reports-a-count
     type: regex
     target: { source: file, path: convert.sh }

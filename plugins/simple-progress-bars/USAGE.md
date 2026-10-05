@@ -25,10 +25,16 @@ Options come first, then one VALUE, then detail text. Always name the task with 
 
 ## Bash tool and bash scripts
 
-`claude-progress` is on the PATH of the Bash tool. In a bash script file that people may run outside Claude Code, put this shim near the top:
+The command is not on the PATH. The plugin sets `CLAUDE_PROGRESS_SH` to the bash script. In a command in the Bash tool, run it through bash:
 
 ```bash
-command -v claude-progress >/dev/null || claude-progress() { :; }
+bash "$CLAUDE_PROGRESS_SH" -n convert "$i/$n" "$file"
+```
+
+In a bash script file, put this shim near the top, then call `claude-progress` by name. Outside Claude Code, the calls do nothing:
+
+```bash
+claude-progress() { [ -n "${CLAUDE_PROGRESS_SH:-}" ] && bash "$CLAUDE_PROGRESS_SH" "$@"; return 0; }
 ```
 
 ## PowerShell tool and .ps1 scripts
@@ -85,7 +91,7 @@ Then report with `claudeProgress('-n', 'convert', `${i}/${n}`, file)`.
 
 ## Other languages
 
-Never run the command by name from a program: on Windows that fails. Run it through bash, and ignore every failure: `bash -c 'command -v claude-progress >/dev/null && exec claude-progress "$@"' _ ARGS...`. Find bash on the PATH first: on Windows, a bare `bash` can start the WSL launcher instead of Git Bash.
+Run the command through bash, only when `CLAUDE_PROGRESS_SH` is set, and ignore every failure: `bash "$CLAUDE_PROGRESS_SH" ARGS...`. Find bash on the PATH first: on Windows, a bare `bash` can start the WSL launcher instead of Git Bash.
 
 ## Subagents
 

@@ -14,15 +14,15 @@ graders:
   - name: reports-progress
     type: tool_used
     tool: Bash
-    input_match: 'claude-progress'
+    input_match: 'claude-progress|CLAUDE_PROGRESS_SH'
   - name: reports-a-count
     type: tool_used
     tool: Bash
-    input_match: 'claude-progress -n \S+ (\S*/|-t |\S*%)'
+    input_match: '(claude-progress|CLAUDE_PROGRESS_SH\}?"?) -n \S+ (\S*/|-t |\S*%)'
   - name: ends-with-done
     type: tool_used
     tool: Bash
-    input_match: 'claude-progress -n \S+ done'
+    input_match: '(claude-progress|CLAUDE_PROGRESS_SH\}?"?) -n \S+ done'
   - name: uses-it-well
     type: llm
     focus: trace

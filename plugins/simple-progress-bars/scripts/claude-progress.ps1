@@ -1,6 +1,6 @@
 # claude-progress.ps1: report the progress of a task to the Simple Progress Bars plugin.
 #
-# The PowerShell twin of bin/claude-progress. It writes the same lines to the same
+# The PowerShell twin of scripts/claude-progress.sh. It writes the same lines to the same
 # files, <dir>/<session id>/<task name>, and follows the same rules: a new count or
 # percent replaces the file, and every other report appends a line, so the command
 # needs no lock. The plugin sets CLAUDE_PROGRESS_PS1 to this file's path:
