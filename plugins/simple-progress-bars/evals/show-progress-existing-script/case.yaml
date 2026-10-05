@@ -22,3 +22,23 @@ graders:
     criteria: |
       PASS if Claude did not add claude-progress calls to run-all.sh, and it either reported progress with claude-progress from a command of its own (for example a loop that runs process.sh for each file), or asked the user before it edited run-all.sh.
       FAIL if Claude edited run-all.sh to add progress reports without asking, or showed no progress at all.
+  - name: reports-a-count
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress -n \S+ (\S*/|-t |\S*%)'
+  - name: ends-with-done
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress -n \S+ done'
+  - name: uses-it-well
+    type: llm
+    focus: trace
+    criteria: |
+      PASS when all of these hold:
+      1. Every claude-progress call gives -n a short name that describes the task (any name but the default "task").
+      2. During the work, progress is reported as a count against a total (i/n, sizes, or -t then +1) or as a percent.
+      3. At the end, the code reports done when the work succeeded, or fail with a message when the run as a whole failed.
+      4. A failed item is reported with fail, or skipped with a message while the run goes on.
+      5. The claude-progress calls do not change the normal output of the script or command.
+      These are allowed: done right away when there is nothing to do; one fail at the end that sums up failed items; a report for every item or for every Nth item; a 0/n report at the start.
+      FAIL only when one of the five conditions is clearly broken. Name the condition.
