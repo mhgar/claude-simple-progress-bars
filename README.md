@@ -8,8 +8,6 @@ When Claude runs a script that takes a while, such as a batch conversion, a down
 
 You do not need to do anything. The plugin teaches Claude to add progress reports to long work it runs, and to new scripts it writes for long jobs, such as a batch conversion or a migration. It asks before it adds them to your existing scripts, and it never adds them to library or app code, tests or CI. Say "show progress" and Claude reports progress on all the work it can measure. The updates go straight to the screen, so they cost no tokens.
 
-> **Early access.** This plugin uses Claude Code function hooks, which are an early-access feature. A Claude Code update can change them and break the plugin.
-
 ## Install
 
 ```
@@ -17,7 +15,7 @@ claude plugin marketplace add mhgar/claude-simple-progress-bars
 claude plugin install simple-progress-bars@simple-progress-bars
 ```
 
-Then start a new Claude Code session. A session that was open before the install does not load the plugin.
+The plugin needs Claude Code v2.1.287 or later, where mods are on by default. Then start a new Claude Code session. A session that was open before the install does not load the plugin.
 
 The plugin works on Linux, macOS and Windows. It needs no other software. On Windows, the command runs in Git Bash, which Claude Code already uses for its Bash tool, or in PowerShell.
 
@@ -49,7 +47,7 @@ done
 claude-progress -n convert done
 ```
 
-The command never breaks a script. It always exits with 0, and outside Claude Code it does nothing. Run `claude-progress --help` for the full reference.
+The command never breaks a script. It always exits with 0, and outside Claude Code it does nothing. Run `bash "$CLAUDE_PROGRESS_SH" --help` for the full reference.
 
 ### Shells and languages
 
@@ -101,7 +99,7 @@ The plugin also adds a short section to Claude's system prompt. That section tel
 ### What it touches
 
 - **Files:** the command writes only in `~/.claude/progress`, or in `$CLAUDE_CONFIG_DIR/progress` if you set that variable. It removes the folders of old sessions after their Claude Code process exits.
-- **Claude Code:** the plugin adds one section to the system prompt, sets `CLAUDE_PROGRESS_DIR` and `CLAUDE_PROGRESS_PS1`, and draws the bars above the prompt. It does not change your commands, their output, or the transcript.
+- **Claude Code:** the plugin adds one section to the system prompt, sets `CLAUDE_PROGRESS_SH`, `CLAUDE_PROGRESS_DIR`, and `CLAUDE_PROGRESS_PS1`, and draws the bars above the prompt. It does not change your commands, their output, or the transcript.
 - **Network:** none. Nothing leaves your machine.
 
 ## Development
