@@ -1,0 +1,26 @@
+schema_version: "1.1"
+name: existing-script-asked
+description: When the user asks for progress in their own script, Claude adds it without asking again.
+tags: [write, use]
+context:
+  scaffold_script: setup.sh
+execution:
+  max_turns: 10
+  timeout_seconds: 300
+  allowed_tools: [Edit, Read, Glob, AskUserQuestion]
+  prompt: |
+    Add a progress bar to backup.sh. Only edit the file.
+graders:
+  - name: reports-progress
+    type: regex
+    target: { source: file, path: backup.sh }
+    pattern: 'claude-progress -n'
+  - name: has-shim
+    type: regex
+    target: { source: file, path: backup.sh }
+    pattern: 'command -v claude-progress'
+  - name: does-not-ask-again
+    type: tool_used
+    tool: AskUserQuestion
+    min: 0
+    max: 0

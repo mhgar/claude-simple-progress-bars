@@ -112,6 +112,16 @@ npx @fission-ai/openspec validate --specs --strict      # check the specs
 
 To try the plugin without installing it, start Claude Code with `claude --plugin-dir plugins/simple-progress-bars`. Then type `! examples/demo.sh` at the prompt. The demo starts six fake tasks that show each kind of bar.
 
+### Claude evals
+
+The tests above check the code. The evals in `plugins/simple-progress-bars/evals` check that Claude uses the plugin well: that it reports progress for long work and when you ask for it, that it asks before it edits your scripts, and that it keeps the command out of library code and quick commands. Each case runs Claude 3 times, because its answers vary.
+
+```
+claude plugin eval plugins/simple-progress-bars --ablation none --scaffold --trust-plugin --allow-tools Bash Write Edit
+```
+
+Cases tagged `bash` need Linux or macOS, because the eval runner cannot confine the Bash tool on Windows. On Windows, add `--tag write` to run the other cases. The "Claude evals" GitHub workflow runs all of them on Linux when you start it by hand. It needs the `ANTHROPIC_API_KEY` repository secret.
+
 ## License
 
 MIT

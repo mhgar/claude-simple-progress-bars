@@ -1,0 +1,19 @@
+schema_version: "1.1"
+name: new-batch-script
+description: A new standalone script for a long batch job gets progress reports and the shim.
+tags: [write, use]
+execution:
+  max_turns: 10
+  timeout_seconds: 300
+  allowed_tools: [Write, Read, Glob]
+  prompt: |
+    Write a bash script convert.sh in this folder. It takes a folder as its argument and converts every .wav file in it to .mp3 with ffmpeg. The folders often hold thousands of files. Only write the file; do not run it.
+graders:
+  - name: reports-progress
+    type: regex
+    target: { source: file, path: convert.sh }
+    pattern: 'claude-progress -n'
+  - name: has-shim
+    type: regex
+    target: { source: file, path: convert.sh }
+    pattern: 'command -v claude-progress'

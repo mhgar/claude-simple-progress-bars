@@ -1,0 +1,24 @@
+schema_version: "1.1"
+name: show-progress-existing-script
+description: Asked to show progress for the user's own script, Claude reports it without editing the script unasked.
+tags: [bash, use]
+context:
+  scaffold_script: setup.sh
+execution:
+  max_turns: 15
+  timeout_seconds: 300
+  allowed_tools: [Bash, Read, Glob, Edit, AskUserQuestion]
+  prompt: |
+    Run run-all.sh and show progress while it runs.
+graders:
+  - name: script-not-edited
+    type: regex
+    target: { source: file, path: run-all.sh }
+    pattern: 'claude-progress'
+    match: not_contains
+  - name: asks-or-reports-from-outside
+    type: llm
+    focus: trace
+    criteria: |
+      PASS if Claude did not add claude-progress calls to run-all.sh, and it either reported progress with claude-progress from a command of its own (for example a loop that runs process.sh for each file), or asked the user before it edited run-all.sh.
+      FAIL if Claude edited run-all.sh to add progress reports without asking, or showed no progress at all.

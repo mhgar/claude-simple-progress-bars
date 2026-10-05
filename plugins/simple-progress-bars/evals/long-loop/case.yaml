@@ -1,0 +1,17 @@
+schema_version: "1.1"
+name: long-loop
+description: A loop that Claude runs for about 40 seconds gets progress reports without being asked.
+tags: [bash, use]
+context:
+  scaffold_script: setup.sh
+execution:
+  max_turns: 15
+  timeout_seconds: 300
+  allowed_tools: [Bash, Read, Glob]
+  prompt: |
+    Run ./process.sh on each of the 150 files in data/, one at a time, and write all the output lines to checksums.txt. Each file takes about a quarter of a second. Tell me when it is done.
+graders:
+  - name: reports-progress
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress'

@@ -14,7 +14,7 @@ export function promptSection(minSeconds: number, shim: string | null): string {
     `Use it for work that will take longer than about ${minSeconds} seconds and can be counted or measured (files, items, bytes, steps, percent):`,
     '- Commands you run: add progress reports to such a script or loop without being asked.',
     '- Script files you write: when a new standalone script does such work and a person runs it and waits for it (a batch conversion, a migration, a backfill, a bulk download), include progress reports and the shim below.',
-    '- Existing script files: always ask the user before you edit one to add reports, in one short question. Until they agree, report from the command you run around the script instead, for example a loop that runs it once for each item.',
+    '- Existing script files: always ask the user before you edit one to add reports, in one short question, unless they already asked you to add progress to that file. Until they agree, report from the command you run around the script instead, for example a loop that runs it once for each item.',
     'Do not use it for quick commands, for work with no measurable progress (one long build, one network call, a test runner with its own output), or in library or application code, services, tests, CI, unattended jobs, or code that already reports progress its own way.',
     '',
     'When the user asks to see progress ("show progress", "with a progress bar", "let me see how far it gets"), use it for all measurable work in that task, even work shorter than the limit above or with only a few coarse steps. The rule for existing script files still applies.',

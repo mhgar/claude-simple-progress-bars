@@ -1,0 +1,17 @@
+schema_version: "1.1"
+name: show-progress-short
+description: When the user asks to see progress, even a few seconds of work gets reports.
+tags: [bash, use]
+context:
+  scaffold_script: setup.sh
+execution:
+  max_turns: 15
+  timeout_seconds: 300
+  allowed_tools: [Bash, Read, Glob]
+  prompt: |
+    Run ./process.sh on each of the 12 files in data/ and save the output to checksums.txt. Show progress.
+graders:
+  - name: reports-progress
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress'

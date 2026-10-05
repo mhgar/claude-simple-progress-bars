@@ -1,0 +1,19 @@
+schema_version: "1.1"
+name: quick-command
+description: A quick command gets no progress reports.
+tags: [bash, avoid]
+context:
+  scaffold_script: setup.sh
+execution:
+  max_turns: 10
+  timeout_seconds: 300
+  allowed_tools: [Bash, Read, Glob]
+  prompt: |
+    How many lines are there in total across the files in data/?
+graders:
+  - name: no-progress
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress'
+    min: 0
+    max: 0

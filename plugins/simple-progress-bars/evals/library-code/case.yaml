@@ -1,0 +1,20 @@
+schema_version: "1.1"
+name: library-code
+description: Library code gets no progress reports, even for long work.
+tags: [write, avoid]
+execution:
+  max_turns: 10
+  timeout_seconds: 300
+  allowed_tools: [Write, Read, Glob]
+  prompt: |
+    Write a Python module images.py in this folder with a function resize_all(folder, size) that resizes every image in a folder with Pillow. Other code imports it. Only write the file.
+graders:
+  - name: no-progress-in-library
+    type: regex
+    target: { source: file, path: images.py }
+    pattern: 'claude-progress'
+    match: not_contains
+  - name: wrote-module
+    type: regex
+    target: { source: file, path: images.py }
+    pattern: 'def resize_all'
