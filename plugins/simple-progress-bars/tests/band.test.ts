@@ -64,7 +64,7 @@ describe('the band above the prompt', () => {
     expect(await ui.find({ type: 'Text', text: /convert/ })).toBeUndefined()
   })
 
-  test('draws the bars even when CLAUDE_PROGRESS_PS1 cannot be set', async ($, on) => {
+  test('draws the bars even when the environment cannot be set', async ($, on) => {
     const clock = world(on, { convert: '17/240 clip.mkv\n' }, { envSetFails: true })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await clock.advance(300)

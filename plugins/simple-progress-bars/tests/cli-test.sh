@@ -165,75 +165,100 @@ in_usage() {
   done < <(grep -v '^#' "$1")
   echo yes
 }
-for shim in shim.sh shim.ps1 shim.py; do
+for shim in shim.sh shim.ps1 shim.py shim.js shim.mjs; do
   check "USAGE.md gives $shim" yes "$(in_usage "$ROOT/$shim")"
 done
 
-# --- The PowerShell twin, where PowerShell is installed
+# --- The other versions: PowerShell, Python, and Node, where each is installed
+#
+# Each runs the same calls as the bash command, and must write the same bytes.
 
 PS=$(command -v pwsh || command -v powershell.exe || command -v powershell || true)
+PY=$(command -v python3 || command -v python || true)
+if [ -n "$PY" ] && ! "$PY" -c 'import sys' 2>/dev/null; then PY=; fi # the Windows store stub
+NODE=$(command -v node || true)
 # native PATH: the form a Windows program takes. Elsewhere, the path as it is.
 native() { if [ -n "$IS_WINDOWS" ]; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
-if [ -n "$PS" ]; then
-  PS1=$(native "$ROOT/bin/claude-progress.ps1")
-  # report IMPL ARGS...: one call through the bash command or the PowerShell twin.
-  report() {
-    local impl=$1; shift
-    if [ "$impl" = sh ]; then "$P" "$@"; else "$PS" -NoProfile -ExecutionPolicy Bypass -File "$PS1" "$@"; fi
-  }
-  for impl in sh ps; do
-    export CLAUDE_CONFIG_DIR CLAUDE_CODE_SESSION_ID=twin
-    CLAUDE_CONFIG_DIR=$(native "$TMP/twin-$impl")
-    report $impl -n count 17/240 clip.mkv
-    report $impl -n count Scanning disk
-    report $impl -n count done
-    report $impl -n pct 42% halfway
-    report $impl -n failed fail "disk full"
-    report $impl -n workers -t 5
-    report $impl -n workers +1
-    report $impl -n workers +1
-    report $impl -n both -t 20 3/9
-    report $impl -n 'a\b/c' 1/2
-    report $impl -n .hidden 1/2
-    report $impl -n gone 1/2
-    report $impl -n gone clear
-    report $impl 1/2
-    report $impl -n words 1/4 cp -p -- file.txt
-  done
-  export CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=test-session
-  check "the PowerShell twin writes the same files" "" "$(diff -r --exclude=.owner "$TMP/twin-sh/progress/twin" "$TMP/twin-ps/progress/twin" 2>&1)"
-  check "the PowerShell twin leaves no temporary files" 0 "$(find "$TMP/twin-ps" -name '.*' ! -name .owner -type f | wc -l | tr -d ' ')"
 
+# report IMPL ARGS...: one call through one version, run as a command.
+report() {
+  local impl=$1; shift
+  case $impl in
+    sh) "$P" "$@" ;;
+    ps) "$PS" -NoProfile -ExecutionPolicy Bypass -File "$(native "$ROOT/bin/claude-progress.ps1")" "$@" ;;
+    py) "$PY" "$(native "$ROOT/bin/claude_progress.py")" "$@" ;;
+    js) "$NODE" "$(native "$ROOT/bin/claude-progress.js")" "$@" ;;
+  esac
+}
+impls=sh
+[ -n "$PS" ] && impls="$impls ps" || echo "skip: no PowerShell, so the PowerShell twin is not tested"
+[ -n "$PY" ] && impls="$impls py" || echo "skip: no Python, so the Python twin is not tested"
+[ -n "$NODE" ] && impls="$impls js" || echo "skip: no Node, so the Node twin is not tested"
+for impl in $impls; do
+  export CLAUDE_CODE_SESSION_ID=twin
+  export CLAUDE_CONFIG_DIR; CLAUDE_CONFIG_DIR=$(native "$TMP/twin-$impl")
+  report $impl -n count 17/240 clip.mkv
+  report $impl -n count Scanning disk
+  report $impl -n count done
+  report $impl -n pct 42% halfway
+  report $impl -n failed fail "disk full"
+  report $impl -n workers -t 5
+  report $impl -n workers +1
+  report $impl -n workers +1
+  report $impl -n both -t 20 3/9
+  report $impl -n 'a\b/c' 1/2
+  report $impl -n .hidden 1/2
+  report $impl -n gone 1/2
+  report $impl -n gone clear
+  report $impl 1/2
+  report $impl -n words 1/4 cp -p -- file.txt
+  report $impl -n ünïcode 1/2 día
+done
+export CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=test-session
+for impl in $impls; do
+  [ $impl = sh ] && continue
+  check "$impl writes the same files as bash" "" "$(diff -r --exclude=.owner "$TMP/twin-sh/progress/twin" "$TMP/twin-$impl/progress/twin" 2>&1)"
+  check "$impl leaves no temporary files" 0 "$(find "$TMP/twin-$impl" -name '.*' ! -name .owner -type f | wc -l | tr -d ' ')"
+  out=$(env -u CLAUDE_CODE_SESSION_ID bash -c "$(declare -f report native); P='$P' PS='$PS' PY='$PY' NODE='$NODE' ROOT='$ROOT' TMP='$TMP' IS_WINDOWS='$IS_WINDOWS' report $impl -n $impl-nosession 1/2"; echo "exit $?")
+  check "$impl exits 0 with no session" "exit 0" "$(printf '%s' "$out" | tr -d '\r' | tail -1)"
+  check "$impl writes nothing with no session" no "$(exists "$D/$impl-nosession")"
+done
+
+if [ -n "$PS" ]; then
   out=$(CLAUDE_CODE_SESSION_ID=twin report ps -n x 2>&1; echo "exit $?")
   check "the twin warns when there is nothing to report" "claude-progress: nothing to report. See claude-progress --help|exit 0" "$(printf '%s' "$out" | tr -d '\r' | tr '\n' '|')"
-  env -u CLAUDE_CODE_SESSION_ID "$PS" -NoProfile -ExecutionPolicy Bypass -File "$PS1" -n twin-nosession 1/2
-  check "the twin exits 0 with no session" 0 "$?"
-  check "the twin writes nothing with no session" no "$(exists "$D/twin-nosession")"
-
   # The shim, as a .ps1 script uses it: values PowerShell reads as numbers are quoted.
-  shim=$(native "$ROOT/shim.ps1")
+  shim=$(native "$ROOT/shim.ps1"); PS1=$(native "$ROOT/bin/claude-progress.ps1")
   CLAUDE_PROGRESS_PS1=$PS1 "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n ps-shim 3/4 two words; claude-progress -n ps-shim '+1'"
   check "the PowerShell shim passes every argument" "3/4 two words|+1|" "$(lines ps-shim)"
   out=$(env -u CLAUDE_PROGRESS_PS1 "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n x 1/2; 'ok'" | tr -d '\r')
   check "the PowerShell shim does nothing without the plugin" ok "$out"
-else
-  echo "skip: no PowerShell, so the PowerShell twin is not tested"
 fi
 
-# --- The Python shim, where Python is installed
-
-PY=$(command -v python3 || command -v python || true)
-if [ -n "$PY" ] && "$PY" -c 'import sys; sys.exit(0)' 2>/dev/null; then
-  script="$TMP/progress.py"
-  { cat "$ROOT/shim.py"; printf '%s\n' 'claude_progress("-n", "py-shim", "2/5", "a.wav")' 'print("ok")'; } > "$script"
-  # PATH with no claude-progress on it, such as one inside a Claude Code session with the plugin.
-  bare=$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r p; do [ -x "$p/claude-progress" ] || printf '%s:' "$p"; done)
-  out=$(PATH="$ROOT/bin:$bare" "$PY" "$(native "$script")" | tr -d '\r')
-  check "the Python shim reports through bash" "ok 2/5 a.wav|" "$out $(lines py-shim)"
-  out=$(PATH="$bare" "$PY" "$(native "$script")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
-  check "the Python shim does nothing without the command" "ok exit 0" "$(printf '%s' "$out" | tr '\n' ' ')"
-else
-  echo "skip: no Python, so the Python shim is not tested"
+# The shims, as scripts use them: they load the twin from CLAUDE_PROGRESS_DIR, and
+# do nothing without it.
+BIN=$(native "$ROOT/bin")
+# shim_script FILE SHIM CALL: writes a script with the shim, then one call and "ok".
+shim_script() { { cat "$ROOT/$2"; printf '%s\n' "$3"; } > "$TMP/$1"; }
+if [ -n "$PY" ]; then
+  shim_script use.py shim.py 'claude_progress("-n", "py-shim", "2/5", "a.wav"); print("ok")'
+  out=$(CLAUDE_PROGRESS_DIR=$BIN "$PY" "$(native "$TMP/use.py")" | tr -d '\r')
+  check "the Python shim reports" "ok 2/5 a.wav|" "$out $(lines py-shim)"
+  out=$(env -u CLAUDE_PROGRESS_DIR "$PY" "$(native "$TMP/use.py")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
+  check "the Python shim does nothing without the plugin" "ok exit 0" "$(printf '%s' "$out" | tr '\n' ' ')"
+fi
+if [ -n "$NODE" ]; then
+  shim_script use.js shim.js 'claudeProgress("-n", "js-shim", "3/5", "b.wav"); console.log("ok")'
+  shim_script use.mjs shim.mjs 'claudeProgress("-n", "esm-shim", "4/5", "c.wav"); console.log("ok")'
+  for kind in js mjs; do
+    name=$([ $kind = js ] && echo js-shim || echo esm-shim)
+    CLAUDE_PROGRESS_DIR=$BIN "$NODE" "$(native "$TMP/use.$kind")" | tr -d '\r' >/dev/null
+    check "the Node .$kind shim wrote its line" yes "$([ -s "$D/$name" ] && echo yes || echo no)"
+    out=$(env -u CLAUDE_PROGRESS_DIR "$NODE" "$(native "$TMP/use.$kind")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
+    check "the Node .$kind shim does nothing without the plugin" "ok exit 0" "$(printf '%s' "$out" | tr '\n' ' ')"
+  done
+  check "the CommonJS shim passes every argument" "3/5 b.wav|" "$(lines js-shim)"
+  check "the ES module shim passes every argument" "4/5 c.wav|" "$(lines esm-shim)"
 fi
 
 echo "$passed passed, $failed failed"

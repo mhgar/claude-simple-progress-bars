@@ -13,10 +13,10 @@ graders:
     type: tool_used
     tool: Read
     input_match: 'USAGE\.md'
-  - name: python-reports-through-bash
+  - name: python-loads-the-twin
     type: regex
     target: { source: file, path: resize.py }
-    pattern: 'shutil\.which\("bash"\)'
+    pattern: 'CLAUDE_PROGRESS_DIR'
   - name: python-reports-a-count
     type: regex
     target: { source: file, path: resize.py }

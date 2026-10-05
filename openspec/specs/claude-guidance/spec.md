@@ -35,7 +35,7 @@ When the request offers the PowerShell tool, the section MUST tell Claude to cal
 - **THEN** the section does not name `CLAUDE_PROGRESS_PS1`
 
 ### Requirement: Shims
-`shim.sh`, `shim.ps1` and `shim.py` MUST each make the calls of a script in that language do nothing where the command is not installed, and exit 0. `USAGE.md` MUST hold every line of each. The Python shim MUST call the command through the bash that `shutil.which` finds, never by name.
+`shim.sh`, `shim.ps1`, `shim.py`, `shim.js` and `shim.mjs` MUST each make the calls of a script in that language do nothing where the plugin is not installed, and exit 0. `USAGE.md` MUST hold every line of each. The Python and Node shims MUST load their twins from `CLAUDE_PROGRESS_DIR`, and never run the command by name.
 
 #### Scenario: Outside Claude Code
 - **WHEN** a script with a shim runs `claude-progress -n x 1/2` where the command is not installed

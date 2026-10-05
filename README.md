@@ -55,7 +55,8 @@ The command never breaks a script. It always exits with 0, and outside Claude Co
 
 - **Bash:** `claude-progress` is on the PATH of Claude's Bash tool.
 - **PowerShell:** the plugin sets `CLAUDE_PROGRESS_PS1` to a PowerShell version of the command, which takes the same arguments: `& $env:CLAUDE_PROGRESS_PS1 -n convert "$i/$n"`.
-- **Python, Node and others:** a script calls the command through bash.
+- **Python and Node:** `claude_progress.py` and `claude-progress.js` write the progress file themselves, with no bash. The plugin sets `CLAUDE_PROGRESS_DIR` to the folder that holds them.
+- **Other languages:** a script calls the command through bash.
 
 Other machines do not have the command. So a script that people may run outside Claude Code needs a short shim near the top, which turns the calls into no-ops there. For a bash script:
 
@@ -95,12 +96,12 @@ The plugin has two parts: the `claude-progress` command, and a set of hooks insi
 2. The plugin reads that session's folder four times a second, and draws a bar for each file.
 3. The plugin also watches Claude's Bash and PowerShell calls. When the call that ran a script ends, the bars of that script end too. A bar that did not reach its total shows `stopped`.
 
-The plugin also adds a short section to Claude's system prompt. That section tells Claude when to use `claude-progress` and how to call it, and points it to `USAGE.md` for the rest. It also sets one environment variable, `CLAUDE_PROGRESS_PS1`, for PowerShell.
+The plugin also adds a short section to Claude's system prompt. That section tells Claude when to use `claude-progress` and how to call it, and points it to `USAGE.md` for the rest. It also sets two environment variables: `CLAUDE_PROGRESS_DIR`, the folder of the command and its versions for other languages, and `CLAUDE_PROGRESS_PS1`, the PowerShell version.
 
 ### What it touches
 
 - **Files:** the command writes only in `~/.claude/progress`, or in `$CLAUDE_CONFIG_DIR/progress` if you set that variable. It removes the folders of old sessions after their Claude Code process exits.
-- **Claude Code:** the plugin adds one section to the system prompt, sets `CLAUDE_PROGRESS_PS1`, and draws the bars above the prompt. It does not change your commands, their output, or the transcript.
+- **Claude Code:** the plugin adds one section to the system prompt, sets `CLAUDE_PROGRESS_DIR` and `CLAUDE_PROGRESS_PS1`, and draws the bars above the prompt. It does not change your commands, their output, or the transcript.
 - **Network:** none. Nothing leaves your machine.
 
 ## Development

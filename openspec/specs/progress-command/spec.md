@@ -1,7 +1,7 @@
 # Progress Command Specification
 
 ## Purpose
-The `claude-progress` command lets a script report the progress of one task with a single call. It is a bash script that works on Linux, macOS, and Windows with Git Bash, and it needs no other runtime. Its PowerShell twin, `claude-progress.ps1`, does the same for PowerShell.
+The `claude-progress` command lets a script report the progress of one task with a single call. It is a bash script that works on Linux, macOS, and Windows with Git Bash, and it needs no other runtime. Its twins do the same in other languages: `claude-progress.ps1` for PowerShell, `claude_progress.py` for Python, and `claude-progress.js` for Node.
 
 ## Requirements
 
@@ -51,9 +51,9 @@ When a call creates a new session directory, it MUST check the other session dir
 - **WHEN** a dead owner's directory is 2 days old, but a file in it got an append 10 minutes ago
 - **THEN** the directory stays
 
-### Requirement: PowerShell twin
-`bin/claude-progress.ps1` MUST take the same arguments as the bash command, and MUST write the same bytes to the same task files for the same calls: UTF-8 with no byte order mark, and LF line ends. It MUST follow the same rules for the session ID, names, owner records, old sessions, and exit status. The plugin MUST set `CLAUDE_PROGRESS_PS1` to its full path at the start of a session, and a failure to set it MUST NOT stop the bars.
+### Requirement: Twins
+`bin/claude-progress.ps1`, `bin/claude_progress.py`, and `bin/claude-progress.js` MUST take the same arguments as the bash command, both when they run as a command and, for Python and Node, through their function, and MUST write the same bytes to the same task files for the same calls: UTF-8 with no byte order mark, and LF line ends. They MUST follow the same rules for the session ID, names, owner records, and exit status, and the Python and Node twins MUST never raise or throw. The PowerShell twin MUST also remove old sessions; the Python and Node twins MAY leave that to the others. The plugin MUST set `CLAUDE_PROGRESS_DIR` to the `bin` folder and `CLAUDE_PROGRESS_PS1` to the PowerShell twin at the start of a session, and a failure to set them MUST NOT stop the bars.
 
 #### Scenario: The same calls
-- **WHEN** the same calls run through the bash command and through the twin, in two config directories
-- **THEN** the two session directories hold the same files, byte for byte, apart from `.owner`
+- **WHEN** the same calls run through the bash command and through each twin, in separate config directories
+- **THEN** the session directories hold the same files, byte for byte, apart from `.owner`

@@ -45,31 +45,44 @@ Quote values that PowerShell reads as numbers, such as `'+1'`. In a .ps1 script 
 function claude-progress { if ($env:CLAUDE_PROGRESS_PS1) { & $env:CLAUDE_PROGRESS_PS1 @args } }
 ```
 
-## Python
+## Python and Node
 
-Never run the command by name from Python: on Windows that fails. Put this shim near the top. It calls the command through bash, and does nothing when bash or the command is missing:
+Both have a version of the command that writes the progress file itself, so it needs no bash and works on every system: `claude_progress.py` and `claude-progress.js`, in the folder that the plugin puts in `CLAUDE_PROGRESS_DIR`. A script loads it with a short shim, which turns the calls into no-ops where the plugin is missing. Neither version ever raises or throws.
+
+Python:
 
 ```python
-import shutil, subprocess
-_BASH = shutil.which("bash")
-def claude_progress(*args):
-    if _BASH:
-        subprocess.run([_BASH, "-c", 'command -v claude-progress >/dev/null && exec claude-progress "$@"', "_", *map(str, args)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+# Makes the calls do nothing where claude-progress is not installed.
+try:
+    import os, sys; sys.path.insert(0, os.environ["CLAUDE_PROGRESS_DIR"])
+    from claude_progress import claude_progress
+except Exception:
+    def claude_progress(*args): pass
 ```
 
 Then report with `claude_progress("-n", "convert", f"{i}/{n}", path)`.
 
-## Node and other languages
-
-Use the same pattern: run `bash -c 'command -v claude-progress >/dev/null && exec claude-progress "$@"' _ ARGS...`, find bash on the PATH first, and ignore every failure. In Node:
+Node, in a CommonJS script (`require`):
 
 ```js
-const { spawnSync } = require('child_process')
-const guard = 'command -v claude-progress >/dev/null && exec claude-progress "$@"'
-const claudeProgress = (...args) => spawnSync('bash', ['-c', guard, '_', ...args.map(String)])
+// Makes the calls do nothing where claude-progress is not installed.
+let claudeProgress = () => {}
+try { ({ claudeProgress } = require(require('node:path').join(process.env.CLAUDE_PROGRESS_DIR, 'claude-progress.js'))) } catch {}
 ```
 
-`spawnSync` reports a missing bash as `result.error` and never throws.
+Node, in an ES module (`import`):
+
+```js
+// Makes the calls do nothing where claude-progress is not installed.
+const { pathToFileURL } = await import('node:url')
+const { claudeProgress } = await import(pathToFileURL(`${process.env.CLAUDE_PROGRESS_DIR}/claude-progress.js`).href).catch(() => ({ claudeProgress() {} }))
+```
+
+Then report with `claudeProgress('-n', 'convert', `${i}/${n}`, file)`.
+
+## Other languages
+
+Never run the command by name from a program: on Windows that fails. Run it through bash, and ignore every failure: `bash -c 'command -v claude-progress >/dev/null && exec claude-progress "$@"' _ ARGS...`. Find bash on the PATH first: on Windows, a bare `bash` can start the WSL launcher instead of Git Bash.
 
 ## Subagents
 

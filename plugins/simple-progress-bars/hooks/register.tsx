@@ -82,10 +82,14 @@ async function start($: EngineInterface, w: Watch) {
     w.dirs = [`${w.base}/${id}`]
     $.clock.every(TICK_MS, () => void tick($, w))
   }
-  // PowerShell does not get the plugin's bin folder on its PATH. It finds the twin through this.
-  await $.env.set('CLAUDE_PROGRESS_PS1', `${$.plugin.root}/bin/claude-progress.ps1`).catch((error: unknown) => {
-    $.ui.log(`simple-progress-bars: CLAUDE_PROGRESS_PS1: ${String(error)}`, { to: 'debug' })
-  })
+  // PowerShell, Python and Node do not look in the plugin's bin folder. They find their twins through these.
+  const fail = (name: string) => (error: unknown) => {
+    $.ui.log(`simple-progress-bars: ${name}: ${String(error)}`, { to: 'debug' })
+  }
+  await Promise.all([
+    $.env.set('CLAUDE_PROGRESS_DIR', `${$.plugin.root}/bin`).catch(fail('CLAUDE_PROGRESS_DIR')),
+    $.env.set('CLAUDE_PROGRESS_PS1', `${$.plugin.root}/bin/claude-progress.ps1`).catch(fail('CLAUDE_PROGRESS_PS1')),
+  ])
 }
 
 /** Runs one shell call. A foreground call is noted while it runs, so that its end can end its bars. */
