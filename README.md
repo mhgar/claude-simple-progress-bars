@@ -55,7 +55,7 @@ The command never breaks a script. It always exits with 0, and outside Claude Co
 
 - **Bash:** `claude-progress` is on the PATH of Claude's Bash tool.
 - **PowerShell:** the plugin sets `CLAUDE_PROGRESS_PS1` to a PowerShell version of the command, which takes the same arguments: `& $env:CLAUDE_PROGRESS_PS1 -n convert "$i/$n"`.
-- **Python and Node:** `claude_progress.py` and `claude-progress.js` write the progress file themselves, with no bash. The plugin sets `CLAUDE_PROGRESS_DIR` to the folder that holds them.
+- **Python and Node:** `claude_progress.py` and `claude-progress.js` write the progress file themselves, with no bash. The plugin sets `CLAUDE_PROGRESS_DIR` to the `scripts` folder that holds them.
 - **Other languages:** a script calls the command through bash.
 
 Other machines do not have the command. So a script that people may run outside Claude Code needs a short shim near the top, which turns the calls into no-ops there. For a bash script:

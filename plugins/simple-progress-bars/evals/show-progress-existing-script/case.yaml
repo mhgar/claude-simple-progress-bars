@@ -40,5 +40,5 @@ graders:
       3. At the end, the code reports done when the work succeeded, or fail with a message when the run as a whole failed.
       4. A failed item is reported with fail, or skipped with a message while the run goes on.
       5. The claude-progress calls do not change the normal output of the script or command.
-      These are allowed: done right away when there is nothing to do; one fail at the end that sums up failed items; a report for every item or for every Nth item; a 0/n report at the start.
+      These are allowed: done right away when there is nothing to do; done with a summary when some items failed and were skipped; one fail at the end that sums up failed items; a report for every item, for every Nth item, or at most once a second by a timer; a 0/n report at the start.
       FAIL only when one of the five conditions is clearly broken. Name the condition.

@@ -47,17 +47,20 @@ function claude-progress { if ($env:CLAUDE_PROGRESS_PS1) { & $env:CLAUDE_PROGRES
 
 ## Python and Node
 
-Both have a version of the command that writes the progress file itself, so it needs no bash and works on every system: `claude_progress.py` and `claude-progress.js`, in the folder that the plugin puts in `CLAUDE_PROGRESS_DIR`. A script loads it with a short shim, which turns the calls into no-ops where the plugin is missing. Neither version ever raises or throws.
+Both have a version of the command that writes the progress file itself, so it needs no bash and works on every system: `claude_progress.py` and `claude-progress.js`, in the `scripts` folder, which the plugin puts in `CLAUDE_PROGRESS_DIR`. A script loads it with a short shim, which turns the calls into no-ops where the plugin is missing. Neither version ever raises or throws.
 
 Python:
 
 ```python
 # Makes the calls do nothing where claude-progress is not installed.
+import os, sys
+_bytecode, sys.dont_write_bytecode = sys.dont_write_bytecode, True  # no __pycache__ in the plugin
 try:
-    import os, sys; sys.path.insert(0, os.environ["CLAUDE_PROGRESS_DIR"])
-    from claude_progress import claude_progress
+    sys.path.insert(0, os.environ["CLAUDE_PROGRESS_DIR"]); from claude_progress import claude_progress
 except Exception:
     def claude_progress(*args): pass
+finally:
+    sys.dont_write_bytecode = _bytecode
 ```
 
 Then report with `claude_progress("-n", "convert", f"{i}/{n}", path)`.

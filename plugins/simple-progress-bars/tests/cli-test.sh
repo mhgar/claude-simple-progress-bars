@@ -174,8 +174,11 @@ done
 # Each runs the same calls as the bash command, and must write the same bytes.
 
 PS=$(command -v pwsh || command -v powershell.exe || command -v powershell || true)
-PY=$(command -v python3 || command -v python || true)
-if [ -n "$PY" ] && ! "$PY" -c 'import sys' 2>/dev/null; then PY=; fi # the Windows store stub
+# The first Python that runs. On Windows, python3 can be the store stub, which runs nothing.
+PY=
+for py in python3 python; do
+  if command -v $py >/dev/null && $py -c 'import sys' 2>/dev/null; then PY=$(command -v $py); break; fi
+done
 NODE=$(command -v node || true)
 # native PATH: the form a Windows program takes. Elsewhere, the path as it is.
 native() { if [ -n "$IS_WINDOWS" ]; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
@@ -185,9 +188,9 @@ report() {
   local impl=$1; shift
   case $impl in
     sh) "$P" "$@" ;;
-    ps) "$PS" -NoProfile -ExecutionPolicy Bypass -File "$(native "$ROOT/bin/claude-progress.ps1")" "$@" ;;
-    py) "$PY" "$(native "$ROOT/bin/claude_progress.py")" "$@" ;;
-    js) "$NODE" "$(native "$ROOT/bin/claude-progress.js")" "$@" ;;
+    ps) "$PS" -NoProfile -ExecutionPolicy Bypass -File "$(native "$ROOT/scripts/claude-progress.ps1")" "$@" ;;
+    py) "$PY" "$(native "$ROOT/scripts/claude_progress.py")" "$@" ;;
+    js) "$NODE" "$(native "$ROOT/scripts/claude-progress.js")" "$@" ;;
   esac
 }
 impls=sh
@@ -228,7 +231,7 @@ if [ -n "$PS" ]; then
   out=$(CLAUDE_CODE_SESSION_ID=twin report ps -n x 2>&1; echo "exit $?")
   check "the twin warns when there is nothing to report" "claude-progress: nothing to report. See claude-progress --help|exit 0" "$(printf '%s' "$out" | tr -d '\r' | tr '\n' '|')"
   # The shim, as a .ps1 script uses it: values PowerShell reads as numbers are quoted.
-  shim=$(native "$ROOT/shim.ps1"); PS1=$(native "$ROOT/bin/claude-progress.ps1")
+  shim=$(native "$ROOT/shim.ps1"); PS1=$(native "$ROOT/scripts/claude-progress.ps1")
   CLAUDE_PROGRESS_PS1=$PS1 "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n ps-shim 3/4 two words; claude-progress -n ps-shim '+1'"
   check "the PowerShell shim passes every argument" "3/4 two words|+1|" "$(lines ps-shim)"
   out=$(env -u CLAUDE_PROGRESS_PS1 "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n x 1/2; 'ok'" | tr -d '\r')
@@ -237,7 +240,7 @@ fi
 
 # The shims, as scripts use them: they load the twin from CLAUDE_PROGRESS_DIR, and
 # do nothing without it.
-BIN=$(native "$ROOT/bin")
+BIN=$(native "$ROOT/scripts")
 # shim_script FILE SHIM CALL: writes a script with the shim, then one call and "ok".
 shim_script() { { cat "$ROOT/$2"; printf '%s\n' "$3"; } > "$TMP/$1"; }
 if [ -n "$PY" ]; then
@@ -246,6 +249,9 @@ if [ -n "$PY" ]; then
   check "the Python shim reports" "ok 2/5 a.wav|" "$out $(lines py-shim)"
   out=$(env -u CLAUDE_PROGRESS_DIR "$PY" "$(native "$TMP/use.py")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
   check "the Python shim does nothing without the plugin" "ok exit 0" "$(printf '%s' "$out" | tr '\n' ' ')"
+  check "the Python shim writes no __pycache__ in the plugin" no "$(exists "$ROOT/scripts/__pycache__")"
+  out=$(CLAUDE_PROGRESS_DIR=$BIN "$PY" -c "$(cat "$ROOT/shim.py"); import sys; print(sys.dont_write_bytecode)" | tr -d '\r')
+  check "the Python shim leaves the script's bytecode setting as it was" False "$out"
 fi
 if [ -n "$NODE" ]; then
   shim_script use.js shim.js 'claudeProgress("-n", "js-shim", "3/5", "b.wav"); console.log("ok")'
