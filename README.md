@@ -59,19 +59,19 @@ done
 claude-progress -n convert done
 ```
 
-The command never breaks a script. It always exits with 0, and outside Claude Code it does nothing. Run `bash "$CLAUDE_PROGRESS_SH" --help` for the full reference.
+The command never breaks a script. It always exits with 0, and outside Claude Code it does nothing. Run the command with `--help` for the full reference.
 
 ### Shells and languages
 
-- **Bash:** the plugin sets `CLAUDE_PROGRESS_SH` to the bash command. A command runs it as `bash "$CLAUDE_PROGRESS_SH" -n convert "$i/$n"`. The plugin puts nothing on the `PATH`.
-- **PowerShell:** the plugin sets `CLAUDE_PROGRESS_PS1` to a PowerShell version of the command, which takes the same arguments: `& $env:CLAUDE_PROGRESS_PS1 -n convert "$i/$n"`.
-- **Python and Node:** `claude_progress.py` and `claude-progress.js` write the progress file themselves, with no bash. The plugin sets `CLAUDE_PROGRESS_DIR` to the `scripts` folder that holds them.
+- **Bash:** the bash command is `scripts/claude-progress.sh`. The plugin gives Claude its full path in the system prompt, and puts nothing on the `PATH`.
+- **PowerShell:** `scripts/claude-progress.ps1` is a PowerShell version of the command, which takes the same arguments.
+- **Python and Node:** `claude_progress.py` and `claude-progress.js` write the progress file themselves, with no bash.
 - **Other languages:** a script calls the command through bash.
 
-A script calls the command through a short shim near the top. In Claude Code, the shim runs the command. Outside Claude Code, it turns the calls into no-ops. For a bash script:
+A script calls the command through a short shim near the top. The shim finds the newest installed copy of the plugin and runs its command. Where the plugin is not installed, it turns the calls into no-ops. For a bash script:
 
 ```bash
-claude-progress() { [ -n "${CLAUDE_PROGRESS_SH:-}" ] && bash "$CLAUDE_PROGRESS_SH" "$@"; return 0; }
+claude-progress() { local c; c=$(ls -dt "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/simple-progress-bars/*/scripts/claude-progress.sh 2>/dev/null | head -n 1); [ -n "$c" ] && bash "$c" "$@"; return 0; }
 ```
 
 [`USAGE.md`](plugins/simple-progress-bars/USAGE.md) has the shim for each language, and the rules for reports in a script. Claude reads it before it writes such a script, so you do not need to.
@@ -106,12 +106,12 @@ The plugin has two parts: the `claude-progress` command, and a set of hooks insi
 2. The plugin reads that session's folder four times a second, and draws a bar for each file.
 3. The plugin also watches Claude's Bash and PowerShell calls. When the call that ran a script ends, the bars of that script end too. A bar that did not reach its total shows `stopped`.
 
-The plugin also adds a short section to Claude's system prompt. That section tells Claude when to use `claude-progress` and how to call it, and points it to `USAGE.md` for the rest. It also sets three environment variables: `CLAUDE_PROGRESS_SH`, the bash command, `CLAUDE_PROGRESS_DIR`, the folder of the command and its versions for other languages, and `CLAUDE_PROGRESS_PS1`, the PowerShell version.
+The plugin also adds a short section to Claude's system prompt. That section tells Claude when to use `claude-progress` and how to call it, and points it to `USAGE.md` for the rest. The plugin sets no environment variables.
 
 ### What it touches
 
 - **Files:** the command writes only in `~/.claude/progress`, or in `$CLAUDE_CONFIG_DIR/progress` if you set that variable. It removes the folders of old sessions after their Claude Code process exits.
-- **Claude Code:** the plugin adds one section to the system prompt, sets `CLAUDE_PROGRESS_SH`, `CLAUDE_PROGRESS_DIR`, and `CLAUDE_PROGRESS_PS1`, and draws the bars above the prompt. It does not change your commands, their output, or the transcript.
+- **Claude Code:** the plugin adds one section to the system prompt, and draws the bars above the prompt. It does not change your commands, their output, or the transcript.
 - **Network:** none. Nothing leaves your machine.
 
 ## Development

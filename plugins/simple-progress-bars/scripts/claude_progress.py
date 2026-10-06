@@ -2,7 +2,7 @@
 
 The Python twin of scripts/claude-progress.sh. It writes the same lines to the same files,
 <dir>/<session id>/<task name>, so it needs no bash. A script imports it from the
-folder in CLAUDE_PROGRESS_DIR, which the plugin sets; USAGE.md has the import shim.
+newest installed copy of the plugin; USAGE.md has the import shim.
 It never raises, and outside a Claude Code session it does nothing.
 
     claude_progress("-n", "convert", f"{i}/{n}", path)

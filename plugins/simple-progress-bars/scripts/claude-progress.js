@@ -2,7 +2,7 @@
 //
 // The Node twin of scripts/claude-progress.sh. It writes the same lines to the same files,
 // <dir>/<session id>/<task name>, so it needs no bash. A script loads it from the
-// folder in CLAUDE_PROGRESS_DIR, which the plugin sets; USAGE.md has the shim for
+// newest installed copy of the plugin; USAGE.md has the shim for
 // CommonJS and for ES modules. It never throws, and outside a Claude Code session
 // it does nothing.
 //

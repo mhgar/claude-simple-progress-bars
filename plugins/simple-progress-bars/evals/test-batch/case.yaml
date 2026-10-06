@@ -14,8 +14,8 @@ graders:
   - name: reports-progress
     type: tool_used
     tool: Bash
-    input_match: 'claude-progress|CLAUDE_PROGRESS_SH'
+    input_match: 'claude-progress'
   - name: reports-a-count
     type: tool_used
     tool: Bash
-    input_match: 'CLAUDE_PROGRESS_SH[\s\S]*([\s"''\\](\$\{?\w+\}?|\$\([^)]*\)|\d[\w.]*)/(\$\{?\w+\}?|\d[\w.]*)|\d%| -t )'
+    input_match: 'claude-progress[\s\S]*([\s"''\\](\$\{?\w+\}?|\$\([^)]*\)|\d[\w.]*)/(\$\{?\w+\}?|\d[\w.]*)|\d%| -t )'

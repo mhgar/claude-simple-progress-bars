@@ -155,10 +155,21 @@ check "no temporary files are left" 0 "$(find "$BASE" -name '.*' ! -name .owner 
 # --- Help, the shims, and USAGE.md
 
 check "no arguments prints the help" yes "$("$P" | grep -q '^Usage:' && echo yes || echo no)"
-out=$(env -u CLAUDE_PROGRESS_SH bash -c "set -eu; . \"$ROOT/shim.sh\"; claude-progress -n x 1/2; echo \$?")
+# The shims find the newest install in the plugin cache. An older install that would
+# write a marker shows when a shim picks the wrong one.
+INSTALL="$CLAUDE_CONFIG_DIR/plugins/cache/test/simple-progress-bars"
+mkdir -p "$INSTALL/0.9.0/scripts" "$INSTALL/1.0.0"
+for f in claude-progress.sh claude-progress.ps1 claude_progress.py claude-progress.js; do
+  printf 'old\n' > "$INSTALL/0.9.0/scripts/$f"
+done
+printf 'echo old > "%s"\n' "$TMP/old-ran" > "$INSTALL/0.9.0/scripts/claude-progress.sh"
+touch -t 202001010000 "$INSTALL/0.9.0/scripts"/* "$INSTALL/0.9.0/scripts"
+cp -R "$ROOT/scripts" "$INSTALL/1.0.0/scripts"
+out=$(CLAUDE_CONFIG_DIR="$TMP/no-plugin" bash -c "set -eu; . \"$ROOT/shim.sh\"; claude-progress -n x 1/2; echo \$?")
 check "the shim makes the calls do nothing" 0 "$out"
-CLAUDE_PROGRESS_SH=$P bash -c ". \"$ROOT/shim.sh\"; claude-progress -n sh-shim 3/4 two words; claude-progress -n sh-shim +1"
+bash -c ". \"$ROOT/shim.sh\"; claude-progress -n sh-shim 3/4 two words; claude-progress -n sh-shim +1"
 check "the bash shim passes every argument" "3/4 two words|+1|" "$(lines sh-shim)"
+check "the bash shim runs the newest install" no "$(exists "$TMP/old-ran")"
 # in_usage FILE: prints yes when USAGE.md holds every line of a shim, the comment aside.
 in_usage() {
   local line
@@ -233,26 +244,25 @@ if [ -n "$PS" ]; then
   out=$(CLAUDE_CODE_SESSION_ID=twin report ps -n x 2>&1; echo "exit $?")
   check "the twin warns when there is nothing to report" "claude-progress: nothing to report. See claude-progress --help|exit 0" "$(printf '%s' "$out" | tr -d '\r' | tr '\n' '|')"
   # The shim, as a .ps1 script uses it: values PowerShell reads as numbers are quoted.
-  shim=$(native "$ROOT/shim.ps1"); PS1=$(native "$ROOT/scripts/claude-progress.ps1")
-  CLAUDE_PROGRESS_PS1=$PS1 "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n ps-shim 3/4 two words; claude-progress -n ps-shim '+1'"
+  shim=$(native "$ROOT/shim.ps1")
+  "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n ps-shim 3/4 two words; claude-progress -n ps-shim '+1'"
   check "the PowerShell shim passes every argument" "3/4 two words|+1|" "$(lines ps-shim)"
-  out=$(env -u CLAUDE_PROGRESS_PS1 "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n x 1/2; 'ok'" | tr -d '\r')
+  out=$(CLAUDE_CONFIG_DIR="$TMP/no-plugin" "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n x 1/2; 'ok'" | tr -d '\r')
   check "the PowerShell shim does nothing without the plugin" ok "$out"
 fi
 
-# The shims, as scripts use them: they load the twin from CLAUDE_PROGRESS_DIR, and
-# do nothing without it.
-BIN=$(native "$ROOT/scripts")
+# The shims, as scripts use them: they load the twin from the newest install, and
+# do nothing without one.
 # shim_script FILE SHIM CALL: writes a script with the shim, then one call and "ok".
 shim_script() { { cat "$ROOT/$2"; printf '%s\n' "$3"; } > "$TMP/$1"; }
 if [ -n "$PY" ]; then
   shim_script use.py shim.py 'claude_progress("-n", "py-shim", "2/5", "a.wav"); print("ok")'
-  out=$(CLAUDE_PROGRESS_DIR=$BIN "$PY" "$(native "$TMP/use.py")" | tr -d '\r')
+  out=$("$PY" "$(native "$TMP/use.py")" | tr -d '\r')
   check "the Python shim reports" "ok 2/5 a.wav|" "$out $(lines py-shim)"
-  out=$(env -u CLAUDE_PROGRESS_DIR "$PY" "$(native "$TMP/use.py")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
+  out=$(CLAUDE_CONFIG_DIR="$TMP/no-plugin" "$PY" "$(native "$TMP/use.py")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
   check "the Python shim does nothing without the plugin" "ok exit 0" "$(printf '%s' "$out" | tr '\n' ' ')"
-  check "the Python shim writes no __pycache__ in the plugin" no "$(exists "$ROOT/scripts/__pycache__")"
-  out=$(CLAUDE_PROGRESS_DIR=$BIN "$PY" -c "$(cat "$ROOT/shim.py"); import sys; print(sys.dont_write_bytecode)" | tr -d '\r')
+  check "the Python shim writes no __pycache__ in the plugin" no "$(exists "$INSTALL/1.0.0/scripts/__pycache__")"
+  out=$("$PY" -c "$(cat "$ROOT/shim.py"); import sys; print(sys.dont_write_bytecode)" | tr -d '\r')
   check "the Python shim leaves the script's bytecode setting as it was" False "$out"
 fi
 if [ -n "$NODE" ]; then
@@ -260,9 +270,9 @@ if [ -n "$NODE" ]; then
   shim_script use.mjs shim.mjs 'claudeProgress("-n", "esm-shim", "4/5", "c.wav"); console.log("ok")'
   for kind in js mjs; do
     name=$([ $kind = js ] && echo js-shim || echo esm-shim)
-    CLAUDE_PROGRESS_DIR=$BIN "$NODE" "$(native "$TMP/use.$kind")" | tr -d '\r' >/dev/null
+    "$NODE" "$(native "$TMP/use.$kind")" | tr -d '\r' >/dev/null
     check "the Node .$kind shim wrote its line" yes "$([ -s "$D/$name" ] && echo yes || echo no)"
-    out=$(env -u CLAUDE_PROGRESS_DIR "$NODE" "$(native "$TMP/use.$kind")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
+    out=$(CLAUDE_CONFIG_DIR="$TMP/no-plugin" "$NODE" "$(native "$TMP/use.$kind")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
     check "the Node .$kind shim does nothing without the plugin" "ok exit 0" "$(printf '%s' "$out" | tr '\n' ' ')"
   done
   check "the CommonJS shim passes every argument" "3/5 b.wav|" "$(lines js-shim)"

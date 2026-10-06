@@ -3,16 +3,16 @@
 # The PowerShell twin of scripts/claude-progress.sh. It writes the same lines to the same
 # files, <dir>/<session id>/<task name>, and follows the same rules: a new count or
 # percent replaces the file, and every other report appends a line, so the command
-# needs no lock. The plugin sets CLAUDE_PROGRESS_PS1 to this file's path:
-#   & $env:CLAUDE_PROGRESS_PS1 -n convert "$i/$n" $file
+# needs no lock. The plugin gives Claude this file's path:
+#   & "<plugin>/scripts/claude-progress.ps1" -n convert "$i/$n" $file
 
 function Show-Usage {
   @'
 claude-progress: report the progress of a task to the Claude Code progress bars.
 
 Usage:
-  & $env:CLAUDE_PROGRESS_PS1 [-n NAME] [-t TOTAL] VALUE [DETAIL...]
-  & $env:CLAUDE_PROGRESS_PS1 -n NAME -t TOTAL
+  & claude-progress.ps1 [-n NAME] [-t TOTAL] VALUE [DETAIL...]
+  & claude-progress.ps1 -n NAME -t TOTAL
 
 Options come first. The first other word is VALUE, and every word after it is
 DETAIL text. Quote a VALUE that PowerShell would read as a number, such as '+1'.

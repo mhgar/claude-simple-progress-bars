@@ -82,15 +82,6 @@ async function start($: EngineInterface, w: Watch) {
     w.dirs = [`${w.base}/${id}`]
     $.clock.every(TICK_MS, () => void tick($, w))
   }
-  // The command and its twins live in scripts/, off every PATH. Shells and scripts find them through these.
-  const fail = (name: string) => (error: unknown) => {
-    $.ui.log(`simple-progress-bars: ${name}: ${String(error)}`, { to: 'debug' })
-  }
-  await Promise.all([
-    $.env.set('CLAUDE_PROGRESS_SH', `${$.plugin.root}/scripts/claude-progress.sh`).catch(fail('CLAUDE_PROGRESS_SH')),
-    $.env.set('CLAUDE_PROGRESS_DIR', `${$.plugin.root}/scripts`).catch(fail('CLAUDE_PROGRESS_DIR')),
-    $.env.set('CLAUDE_PROGRESS_PS1', `${$.plugin.root}/scripts/claude-progress.ps1`).catch(fail('CLAUDE_PROGRESS_PS1')),
-  ])
 }
 
 /** Runs one shell call. A foreground call is noted while it runs, so that its end can end its bars. */
@@ -124,7 +115,7 @@ export const register: Register = (on, options) => {
 
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
-    const text = promptSection(minSeconds, `${$.plugin.root}/USAGE.md`, e.tools.includes('PowerShell'))
+    const text = promptSection(minSeconds, $.plugin.root, e.tools.includes('PowerShell'))
     const section = { id: 'simple-progress-bars:usage', text, scope: 'session' as const }
     return { sections: [...result.sections, section] }
   })

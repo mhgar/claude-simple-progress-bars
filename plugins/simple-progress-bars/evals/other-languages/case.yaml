@@ -16,7 +16,7 @@ graders:
   - name: python-loads-the-twin
     type: regex
     target: { source: file, path: resize.py }
-    pattern: 'CLAUDE_PROGRESS_DIR'
+    pattern: 'simple-progress-bars'
   - name: python-reports-a-count
     type: regex
     target: { source: file, path: resize.py }
@@ -24,7 +24,7 @@ graders:
   - name: powershell-uses-the-twin
     type: regex
     target: { source: file, path: resize.ps1 }
-    pattern: 'CLAUDE_PROGRESS_PS1'
+    pattern: 'claude-progress\.ps1'
   - name: python-uses-it-well
     type: llm
     focus: { source: file, path: resize.py }

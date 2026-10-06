@@ -18,7 +18,7 @@ graders:
   - name: has-shim
     type: regex
     target: { source: file, path: backup.sh }
-    pattern: 'CLAUDE_PROGRESS_SH'
+    pattern: 'plugins/cache/\*/simple-progress-bars'
   - name: does-not-ask-again
     type: tool_used
     tool: AskUserQuestion
@@ -27,7 +27,7 @@ graders:
   - name: reports-a-count
     type: regex
     target: { source: file, path: backup.sh }
-    pattern: 'claude-progress -n \S+ (\S*/|-t |\S*%)'
+    pattern: 'claude-progress -n \S+ ("[^"]*/[^"]*"|\S*/|-t |\S*%)'
   - name: ends-with-done
     type: regex
     target: { source: file, path: backup.sh }

@@ -3,9 +3,9 @@
 # From your own shell, no Bash call owns the tasks. So no bar shows "stopped".
 # Run it in a Claude Code session with the plugin enabled: ! examples/demo.sh
 set -u
-: "${CLAUDE_PROGRESS_SH:=$(cd "$(dirname "$0")/.." && pwd)/plugins/simple-progress-bars/scripts/claude-progress.sh}"
-export CLAUDE_PROGRESS_SH
-claude-progress() { bash "$CLAUDE_PROGRESS_SH" "$@"; }
+CLAUDE_PROGRESS=$(cd "$(dirname "$0")/.." && pwd)/plugins/simple-progress-bars/scripts/claude-progress.sh
+export CLAUDE_PROGRESS
+claude-progress() { bash "$CLAUDE_PROGRESS" "$@"; }
 export -f claude-progress
 if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
   echo "Run this inside a Claude Code session."

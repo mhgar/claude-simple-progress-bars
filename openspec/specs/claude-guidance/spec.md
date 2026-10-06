@@ -1,12 +1,12 @@
 # Claude Guidance Specification
 
 ## Purpose
-The plugin teaches Claude when and how to report progress. A short section in the system prompt holds what Claude needs when it decides: when to use the command and its main forms. `USAGE.md` holds the rest, one file read away: the shim for each script language, the PowerShell details, and the full rules.
+The plugin teaches Claude when and how to report progress. A short section in the system prompt holds what Claude needs when it decides: when to use the command and its main forms. `USAGE.md` holds the rest, one file read away: the full command reference, how a bar behaves, what to do when a bar is wrong, and the shim for each script language.
 
 ## Requirements
 
 ### Requirement: Prompt section
-The plugin MUST add the section `simple-progress-bars:usage` at the end of the system prompt of each request. The section MUST name the command and its main forms, and tell Claude to run it in the Bash tool as `bash "$CLAUDE_PROGRESS_SH"`. It MUST tell Claude to use it for work that makes the person wait longer than about `minSeconds` seconds (default 2, from 1 to 3600), and to add it when Claude is not sure that a command is quick, in three cases: in every command Claude runs, including ad hoc loops, chains of commands and inline scripts, without being asked; in new standalone script files that a person runs and waits for; and in existing script files only after the user agrees, which Claude MUST ask first unless the user already asked for progress in that file. It MUST tell Claude that batch work and file transfers almost always need reports. It MUST tell Claude to report a count for a batch of several items or steps, such as a test run or a folder of images to convert, bytes or a percent for a file transfer or download, and a text status that names the step for one step that it cannot measure. It MUST tell Claude not to use it for quick commands, or in library or application code, services, test files, CI, unattended jobs, or code that already reports progress. When the user asks to see progress, the section MUST tell Claude to use it for all work in that task, whatever its length, and still ask before it edits an existing script file. It MUST tell Claude to give true counts in the `done` message, to keep progress code silent also on errors, and to report at most about once a second, and to run a job that may outlast the tool timeout in the background.
+The plugin MUST add the section `simple-progress-bars:usage` at the end of the system prompt of each request. The section MUST name the command and its main forms, and tell Claude to run it in the Bash tool as `bash "<plugin root>/scripts/claude-progress.sh"`, with the full path of the plugin's folder. It MUST tell Claude to use it for work that makes the person wait longer than about `minSeconds` seconds (default 2, from 1 to 3600), and to add it when Claude is not sure that a command is quick, in three cases: in every command Claude runs, including ad hoc loops, chains of commands and inline scripts, without being asked; in new standalone script files that a person runs and waits for; and in existing script files only after the user agrees, which Claude MUST ask first unless the user already asked for progress in that file. It MUST tell Claude that batch work and file transfers almost always need reports. It MUST tell Claude to report a count for a batch of several items or steps, such as a test run or a folder of images to convert, bytes or a percent for a file transfer or download, and a text status that names the step for one step that it cannot measure. It MUST tell Claude not to use it for quick commands, or in library or application code, services, test files, CI, unattended jobs, or code that already reports progress. When the user asks to see progress, the section MUST tell Claude to use it for all work in that task, whatever its length, and still ask before it edits an existing script file. It MUST tell Claude to give true counts in the `done` message, to keep progress code silent also on errors, and to report at most about once a second, and to run a job that may outlast the tool timeout in the background.
 
 #### Scenario: A custom threshold
 - **WHEN** the setting `minSeconds` is 90
@@ -21,21 +21,21 @@ The plugin MUST add the section `simple-progress-bars:usage` at the end of the s
 - **THEN** the section tells Claude to report progress for that loop
 
 ### Requirement: Usage file
-The section MUST give the full path of `USAGE.md`, and tell Claude to read it before it writes a script file that reports progress or uses the command from another language, and to tell a subagent that gets such work to read it too. The section MUST NOT hold the shims.
+The section MUST give the full path of `USAGE.md`, and tell Claude to read it before it writes a script file that reports progress, or when a bar does not act as Claude expects, and to tell a subagent that gets such work to read it too. The section MUST NOT hold the shims.
 
 #### Scenario: A Python script
 - **WHEN** Claude writes a long Python batch script
 - **THEN** the section has sent it to `USAGE.md`, which has the Python shim
 
 ### Requirement: PowerShell
-When the request offers the PowerShell tool, the section MUST tell Claude to call `& $env:CLAUDE_PROGRESS_PS1` there with the same arguments. Otherwise it MUST leave PowerShell out.
+When the request offers the PowerShell tool, the section MUST tell Claude to call `& "<plugin root>/scripts/claude-progress.ps1"` there with the same arguments. Otherwise it MUST leave PowerShell out.
 
 #### Scenario: No PowerShell tool
 - **WHEN** a request on Linux offers only the Bash tool
-- **THEN** the section does not name `CLAUDE_PROGRESS_PS1`
+- **THEN** the section does not name `claude-progress.ps1`
 
 ### Requirement: Shims
-`shim.sh`, `shim.ps1`, `shim.py`, `shim.js` and `shim.mjs` MUST each make the calls of a script in that language do nothing where the plugin is not installed, and exit 0. `USAGE.md` MUST hold every line of each. The bash shim MUST run the command through `CLAUDE_PROGRESS_SH`. The Python and Node shims MUST load their twins from `CLAUDE_PROGRESS_DIR`, and never run the command by name.
+`shim.sh`, `shim.ps1`, `shim.py`, `shim.js` and `shim.mjs` MUST each make the calls of a script in that language do nothing where the plugin is not installed, and exit 0. `USAGE.md` MUST hold every line of each. Each shim MUST find the newest installed copy of the plugin, by modification time, under `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/*/simple-progress-bars/*/scripts`. The bash shim MUST run the command there. The Python and Node shims MUST load their twins from there, and never run the command by name.
 
 #### Scenario: Outside Claude Code
 - **WHEN** a script with a shim runs `claude-progress -n x 1/2` where the command is not installed

@@ -14,8 +14,8 @@ graders:
   - name: reports-progress
     type: tool_used
     tool: Bash
-    input_match: 'claude-progress|CLAUDE_PROGRESS_SH'
+    input_match: 'claude-progress'
   - name: ends-with-done
     type: tool_used
     tool: Bash
-    input_match: 'CLAUDE_PROGRESS_SH[\s\S]*(?:(?<![\\\w])|(?<=\\n))\w+ (done|fail)\b'
+    input_match: 'claude-progress[\s\S]*(?:(?<![\\\w])|(?<=\\n))\w+ (done|fail)\b'

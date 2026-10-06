@@ -20,23 +20,23 @@ graders:
     type: llm
     focus: trace
     criteria: |
-      In a Bash tool command, a claude-progress call is `bash "$CLAUDE_PROGRESS_SH" ...`, written out or run through a shell function or variable. The calls print nothing, so judge them from the command text, not from the command output. A call takes -n NAME, then one value (a count such as 3/8, a size, a percent, done, fail, or a text status), then optional detail text, so `-n x 3/8 file.txt` and `-n x done "8 processed, 0 failed"` are both correct.
+      In a Bash tool command, a claude-progress call is `bash "<plugin>/scripts/claude-progress.sh" ...`, written out or run through a shell function or variable. The calls print nothing, so judge them from the command text, not from the command output. A call takes -n NAME, then one value (a count such as 3/8, a size, a percent, done, fail, or a text status), then optional detail text, so `-n x 3/8 file.txt` and `-n x done "8 processed, 0 failed"` are both correct.
       PASS if Claude did not add claude-progress calls to run-all.sh, and it either reported progress with claude-progress from a command of its own (for example a loop that runs process.sh for each file), or asked the user before it edited run-all.sh.
       FAIL if Claude edited run-all.sh to add progress reports without asking, or showed no progress at all.
       Reply with only the word PASS or the word FAIL. Do not explain.
   - name: reports-a-count
     type: tool_used
     tool: Bash
-    input_match: 'CLAUDE_PROGRESS_SH[\s\S]*([\s"''\\](\$\{?\w+\}?|\$\([^)]*\)|\d[\w.]*)/(\$\{?\w+\}?|\d[\w.]*)|\d%| -t )'
+    input_match: 'claude-progress[\s\S]*([\s"''\\](\$\{?\w+\}?|\$\([^)]*\)|\d[\w.]*)/(\$\{?\w+\}?|\d[\w.]*)|\d%| -t )'
   - name: ends-with-done
     type: tool_used
     tool: Bash
-    input_match: 'CLAUDE_PROGRESS_SH[\s\S]*(?:(?<![\\\w])|(?<=\\n))\w+ done\b'
+    input_match: 'claude-progress[\s\S]*(?:(?<![\\\w])|(?<=\\n))\w+ done\b'
   - name: uses-it-well
     type: llm
     focus: trace
     criteria: |
-      In a Bash tool command, a claude-progress call is `bash "$CLAUDE_PROGRESS_SH" ...`, written out or run through a shell function or variable. The calls print nothing, so judge them from the command text, not from the command output. A call takes -n NAME, then one value (a count such as 3/8, a size, a percent, done, fail, or a text status), then optional detail text, so `-n x 3/8 file.txt` and `-n x done "8 processed, 0 failed"` are both correct.
+      In a Bash tool command, a claude-progress call is `bash "<plugin>/scripts/claude-progress.sh" ...`, written out or run through a shell function or variable. The calls print nothing, so judge them from the command text, not from the command output. A call takes -n NAME, then one value (a count such as 3/8, a size, a percent, done, fail, or a text status), then optional detail text, so `-n x 3/8 file.txt` and `-n x done "8 processed, 0 failed"` are both correct.
       PASS when all of these hold:
       1. Every claude-progress call gives -n a short name that describes the task (any name but the default "task").
       2. During the work, progress is reported as a count against a total (i/n, sizes, or -t then +1) or as a percent.

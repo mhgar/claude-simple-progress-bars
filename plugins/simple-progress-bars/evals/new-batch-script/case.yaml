@@ -16,11 +16,11 @@ graders:
   - name: has-shim
     type: regex
     target: { source: file, path: convert.sh }
-    pattern: 'CLAUDE_PROGRESS_SH'
+    pattern: 'plugins/cache/\*/simple-progress-bars'
   - name: reports-a-count
     type: regex
     target: { source: file, path: convert.sh }
-    pattern: 'claude-progress -n \S+ (\S*/|-t |\S*%)'
+    pattern: 'claude-progress -n \S+ ("[^"]*/[^"]*"|\S*/|-t |\S*%)'
   - name: ends-with-done
     type: regex
     target: { source: file, path: convert.sh }

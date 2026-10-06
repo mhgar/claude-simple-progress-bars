@@ -14,4 +14,4 @@ graders:
   - name: reports-progress
     type: tool_used
     tool: Bash
-    input_match: 'claude-progress|CLAUDE_PROGRESS_SH'
+    input_match: 'claude-progress'

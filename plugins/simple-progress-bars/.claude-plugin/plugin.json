@@ -1,7 +1,7 @@
 {
   "name": "simple-progress-bars",
   "displayName": "Simple Progress Bars",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Progress bars with time estimates for long scripts that Claude runs. Scripts report with one command: claude-progress 17/240.",
   "author": {
     "name": "Max Hunter",
