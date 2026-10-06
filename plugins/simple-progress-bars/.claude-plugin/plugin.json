@@ -1,7 +1,7 @@
 {
   "name": "simple-progress-bars",
   "displayName": "Simple Progress Bars",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Progress bars with time estimates for long scripts that Claude runs. Scripts report with one command: claude-progress 17/240.",
   "author": {
     "name": "Max Hunter",
@@ -32,9 +32,9 @@
     "minSeconds": {
       "type": "number",
       "title": "Shortest script for a bar (seconds)",
-      "description": "Claude adds progress reports only to scripts it expects to run at least this long.",
-      "default": 30,
-      "min": 5,
+      "description": "Claude adds progress reports to commands it expects to run at least this long.",
+      "default": 2,
+      "min": 1,
       "max": 3600
     }
   }

@@ -4,7 +4,7 @@
 
 Progress bars with time estimates for the long scripts that Claude Code runs. A script reports its progress with one command, for example `bash "$CLAUDE_PROGRESS_SH" -n convert 17/240`, and a bar with the count, the percent, the elapsed time, and a time estimate shows in the band above the prompt of Claude Code. Each update costs zero tokens.
 
-The plugin sets `CLAUDE_PROGRESS_SH` to the `claude-progress` command, sets `CLAUDE_PROGRESS_DIR` and `CLAUDE_PROGRESS_PS1` so that PowerShell, Python, and Node scripts can find their versions of it, and adds a short section to Claude's system prompt about when and how to use it. [`USAGE.md`](USAGE.md) has the full reference, with a shim for bash, PowerShell, Python, and Node scripts.
+The plugin sets `CLAUDE_PROGRESS_SH` to the `claude-progress` command, sets `CLAUDE_PROGRESS_DIR` and `CLAUDE_PROGRESS_PS1` so that PowerShell, Python, and Node scripts can find their versions of it, and adds a short section to Claude's system prompt about when and how to use it. [`USAGE.md`](USAGE.md) has the shim for bash, PowerShell, Python, and Node scripts, and the rules for reports in a script.
 
 The command is a bash script, `scripts/claude-progress.sh`. Its PowerShell, Python, and Node twins are readable scripts too, in the same folder. The plugin puts no folder on any `PATH`. The plugin ships no compiled programs and downloads nothing. The commands write only in `$CLAUDE_CONFIG_DIR/progress`, or `~/.claude/progress`. The plugin only reads that directory, and runs no processes. Neither part uses the network.
 

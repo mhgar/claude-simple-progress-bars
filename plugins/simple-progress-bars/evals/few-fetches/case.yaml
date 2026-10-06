@@ -1,0 +1,17 @@
+schema_version: "1.1"
+name: few-fetches
+description: A few slow steps in one command, about 12 seconds in all, get progress reports without being asked.
+tags: [bash, use]
+context:
+  scaffold_script: setup.sh
+execution:
+  max_turns: 15
+  timeout_seconds: 300
+  allowed_tools: [Bash, Read, Glob]
+  prompt: |
+    Get the four papers listed in papers.txt with ./fetch.sh URL, then tell me how many words each one has.
+graders:
+  - name: reports-progress
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress|CLAUDE_PROGRESS_SH'

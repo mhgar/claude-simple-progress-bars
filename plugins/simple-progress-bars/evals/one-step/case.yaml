@@ -1,0 +1,21 @@
+schema_version: "1.1"
+name: one-step
+description: One step of about 4 seconds that cannot be measured gets a text status without being asked.
+tags: [bash, use]
+context:
+  scaffold_script: setup.sh
+execution:
+  max_turns: 10
+  timeout_seconds: 300
+  allowed_tools: [Bash, Read, Glob]
+  prompt: |
+    Build the project with ./build.sh and tell me if it worked.
+graders:
+  - name: reports-progress
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress|CLAUDE_PROGRESS_SH'
+  - name: ends-with-done
+    type: tool_used
+    tool: Bash
+    input_match: 'CLAUDE_PROGRESS_SH[\s\S]*(?:(?<![\\\w])|(?<=\\n))\w+ (done|fail)\b'

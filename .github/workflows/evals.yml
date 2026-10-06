@@ -25,7 +25,7 @@ jobs:
       - run: >
           claude plugin eval plugins/simple-progress-bars
           --runs ${{ inputs.runs }} --ablation none --scaffold --trust-plugin
-          --allow-tools Bash Write Edit -j 4 --no-publish
+          --allow-tools Bash Write Edit -j 4 --no-publish --judge-model sonnet
           --report evals-report.html
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

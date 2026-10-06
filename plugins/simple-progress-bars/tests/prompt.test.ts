@@ -9,11 +9,29 @@ describe('promptSection', () => {
     expect(promptSection(90, USAGE, false)).toContain('about 90 seconds')
   })
 
+  test('covers ad hoc commands, and commands that may not be quick', () => {
+    const text = promptSection(2, USAGE, false)
+    expect(text).toContain('loops, chains of commands, inline scripts')
+    expect(text).toContain('If you are not sure that it is quick, add them.')
+  })
+
+  test('reports a text status for one step that it cannot measure', () => {
+    const text = promptSection(2, USAGE, false)
+    expect(text).toContain('One step that you cannot measure, such as a build: a text status')
+    expect(text).toContain('-n NAME Building the viewer')
+  })
+
+  test('names batch work and file transfers', () => {
+    const text = promptSection(2, USAGE, false)
+    expect(text).toContain('test runs, batches, transfers')
+    expect(text).toContain('A transfer: bytes')
+  })
+
   test('separates commands, new script files, and existing scripts', () => {
     const text = promptSection(30, USAGE, false)
-    expect(text).toContain('without being asked')
-    expect(text).toContain('New script files you write')
-    expect(text).toContain('ask in one short question before you add reports')
+    expect(text).toContain('Without being asked')
+    expect(text).toContain('New script files that a person runs')
+    expect(text).toContain('Existing script files: ask before you add reports')
     expect(text).toContain('library or application code')
   })
 
@@ -22,7 +40,15 @@ describe('promptSection', () => {
   })
 
   test('runs the bash command through CLAUDE_PROGRESS_SH', () => {
-    expect(promptSection(30, USAGE, false)).toContain('bash "$CLAUDE_PROGRESS_SH" -n NAME 17/240')
+    const text = promptSection(30, USAGE, false)
+    expect(text).toContain('run `bash "$CLAUDE_PROGRESS_SH"`')
+    expect(text).toContain('`-n NAME 17/240 [detail]`')
+  })
+
+  test('asks for true counts in done, and silent progress code', () => {
+    const text = promptSection(30, USAGE, false)
+    expect(text).toContain('with true counts')
+    expect(text).toContain('Progress code must print nothing, also on errors.')
   })
 
   test('limits the rate, and sends long jobs to the background', () => {
@@ -34,7 +60,7 @@ describe('promptSection', () => {
   test('points to USAGE.md for scripts, other languages, and subagents', () => {
     const text = promptSection(30, USAGE, false)
     expect(text).toContain(`Read ${USAGE} before you write a script file`)
-    expect(text).toContain('tell it to read that file')
+    expect(text).toContain('Tell a subagent with such work to read it')
   })
 
   test('tells about PowerShell only when the session has the PowerShell tool', () => {

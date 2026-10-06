@@ -107,7 +107,7 @@ async function track<T>($: EngineInterface, w: Watch, isBackground: boolean | un
 
 export const register: Register = (on, options) => {
   const maxRows = typeof options.maxRows === 'number' ? Math.max(1, Math.round(options.maxRows)) : 3
-  const minSeconds = typeof options.minSeconds === 'number' ? Math.max(1, options.minSeconds) : 30
+  const minSeconds = typeof options.minSeconds === 'number' ? Math.max(1, options.minSeconds) : 2
   const w: Watch = {
     base: null, dirs: [], calls: [], hidden: new Map(), isBusy: false, ticks: 0,
   }

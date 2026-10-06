@@ -1,64 +1,32 @@
-# claude-progress usage
+# claude-progress in script files
 
-`claude-progress` shows a live progress bar for a task in the Claude Code interface. Reports cost no tokens. Outside a Claude Code session the command does nothing, and it always exits 0, so it never breaks a script.
+Put the shim for the script's language near the top, then report through it. Without the plugin, the calls do nothing and never fail.
 
-## Calls
+Forms: `-n NAME 17/240 [detail]`, `-n NAME 1.5G/4G`, `-n NAME 42%`, `-n NAME Some status`, `-n NAME -t 500` then `-n NAME +1` from parallel workers, `-n NAME done [message]`, `-n NAME fail message`.
 
-Options come first, then one VALUE, then detail text. Always name the task with `-n`. Each name gets its own bar.
+- Count failed items, and give true counts in `done`, such as `done "38 copied, 2 failed"`. Use `fail` when the whole run fails.
+- Keep progress code silent. The calls print nothing. Send errors of helper code, such as a line count of a file that does not exist yet, to `/dev/null`.
+- In a fast loop, report every Nth item, at most about once a second.
 
-| Call | Meaning |
-| --- | --- |
-| `claude-progress -n NAME 17/240 [detail]` | 17 of 240 done. Sizes work too: `1.5G/4G` shows a transfer rate |
-| `claude-progress -n NAME 42% [detail]` | A percent |
-| `claude-progress -n NAME -t 500`, then `claude-progress -n NAME +1` | A total, then one step at a time. Safe from parallel workers |
-| `claude-progress -n NAME Scanning disk` | A text status, with no number |
-| `claude-progress -n NAME done [message]` | The task is complete |
-| `claude-progress -n NAME fail [message]` | The task failed |
-| `claude-progress -n NAME clear` | Remove the bar now |
-
-## Rules
-
-- Report `done` at the end, or `fail` with a message when the run as a whole fails. A failed item can be skipped with a message instead.
-- Report at most about once a second. Each call starts a process, which takes about 50 ms on Windows, so in a fast loop report every Nth item.
-- A foreground bar ends when its tool call ends. Run a job that may outlast the tool timeout in the background: its bar keeps going.
-- Calls write nothing to stdout, so they never change the output of a script.
-
-## Bash tool and bash scripts
-
-The command is not on the PATH. The plugin sets `CLAUDE_PROGRESS_SH` to the bash script. In a command in the Bash tool, run it through bash:
-
-```bash
-bash "$CLAUDE_PROGRESS_SH" -n convert "$i/$n" "$file"
-```
-
-In a bash script file, put this shim near the top, then call `claude-progress` by name. Outside Claude Code, the calls do nothing:
+## Bash
 
 ```bash
 claude-progress() { [ -n "${CLAUDE_PROGRESS_SH:-}" ] && bash "$CLAUDE_PROGRESS_SH" "$@"; return 0; }
 ```
 
-## PowerShell tool and .ps1 scripts
+Then `claude-progress -n convert "$i/$n" "$file"`.
 
-The command is not on the PATH of PowerShell. The plugin sets `CLAUDE_PROGRESS_PS1` to its PowerShell twin, which takes the same arguments:
-
-```powershell
-& $env:CLAUDE_PROGRESS_PS1 -n convert "$i/$n" $file.Name
-```
-
-Quote values that PowerShell reads as numbers, such as `'+1'`. In a .ps1 script file, put this shim near the top, then call `claude-progress` as in bash:
+## PowerShell
 
 ```powershell
 function claude-progress { if ($env:CLAUDE_PROGRESS_PS1) { & $env:CLAUDE_PROGRESS_PS1 @args } }
 ```
 
-## Python and Node
+Quote values that PowerShell reads as numbers, such as `'+1'`.
 
-Both have a version of the command that writes the progress file itself, so it needs no bash and works on every system: `claude_progress.py` and `claude-progress.js`, in the `scripts` folder, which the plugin puts in `CLAUDE_PROGRESS_DIR`. A script loads it with a short shim, which turns the calls into no-ops where the plugin is missing. Neither version ever raises or throws.
-
-Python:
+## Python
 
 ```python
-# Makes the calls do nothing where claude-progress is not installed.
 import os, sys
 _bytecode, sys.dont_write_bytecode = sys.dont_write_bytecode, True  # no __pycache__ in the plugin
 try:
@@ -69,9 +37,11 @@ finally:
     sys.dont_write_bytecode = _bytecode
 ```
 
-Then report with `claude_progress("-n", "convert", f"{i}/{n}", path)`.
+Then `claude_progress("-n", "convert", f"{i}/{n}", path)`.
 
-Node, in a CommonJS script (`require`):
+## Node
+
+CommonJS (`require`):
 
 ```js
 // Makes the calls do nothing where claude-progress is not installed.
@@ -79,7 +49,7 @@ let claudeProgress = () => {}
 try { ({ claudeProgress } = require(require('node:path').join(process.env.CLAUDE_PROGRESS_DIR, 'claude-progress.js'))) } catch {}
 ```
 
-Node, in an ES module (`import`):
+ES module (`import`):
 
 ```js
 // Makes the calls do nothing where claude-progress is not installed.
@@ -87,12 +57,8 @@ const { pathToFileURL } = await import('node:url')
 const { claudeProgress } = await import(pathToFileURL(`${process.env.CLAUDE_PROGRESS_DIR}/claude-progress.js`).href).catch(() => ({ claudeProgress() {} }))
 ```
 
-Then report with `claudeProgress('-n', 'convert', `${i}/${n}`, file)`.
+Then `claudeProgress('-n', 'convert', `${i}/${n}`, file)`.
 
 ## Other languages
 
-Run the command through bash, only when `CLAUDE_PROGRESS_SH` is set, and ignore every failure: `bash "$CLAUDE_PROGRESS_SH" ARGS...`. Find bash on the PATH first: on Windows, a bare `bash` can start the WSL launcher instead of Git Bash.
-
-## Subagents
-
-A subagent shares the session, so its reports show in the same bars. When you give a subagent long work that can be counted, tell it to report with `claude-progress`, and give it the path of this file.
+If `CLAUDE_PROGRESS_SH` is set, run `bash "$CLAUDE_PROGRESS_SH" ARGS...` and ignore every failure. On Windows, find bash on the PATH first, because a bare `bash` can start WSL.
