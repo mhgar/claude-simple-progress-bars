@@ -1,6 +1,6 @@
 # Simple Progress Bars
 
-![Progress bars above the Claude Code prompt: two running tasks with time estimates, one with a transfer size, a stalled task, and a failed upload in red](plugins/simple-progress-bars/assets/screenshot.png)
+![Progress bars above the Claude Code prompt: two running tasks with time estimates, one with a transfer size, a stalled task, a finished task in green, and a failed upload in red](plugins/simple-progress-bars/assets/screenshot.png)
 
 Progress bars for the long scripts that Claude Code runs.
 
