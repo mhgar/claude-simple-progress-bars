@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Six fake tasks that show each kind of bar, for about 45 seconds.
+# Six fake tasks that show each kind of bar, for about 75 seconds.
+# From about 42 s to 70 s, bars show running, stalled, failed, and done at the same time.
 # From your own shell, no Bash call owns the tasks. So no bar shows "stopped".
 # Run it in a Claude Code session with the plugin enabled: ! examples/demo.sh
 set -u
@@ -17,7 +18,7 @@ convert() {
   local n=90 i
   for ((i = 1; i <= n; i++)); do
     claude-progress -n convert-videos "$i/$n" "$(printf 'clip_%03d.mkv' "$i")"
-    sleep "0.$((RANDOM % 4 + 3))"
+    sleep "0.$((RANDOM % 4 + 7))"
   done
   claude-progress -n convert-videos "done"
 }
@@ -25,18 +26,18 @@ convert() {
 # Sizes, with a rate.
 download() {
   local mb
-  for ((mb = 0; mb <= 2048; mb += 40)); do
+  for ((mb = 0; mb <= 2048; mb += 32)); do
     claude-progress -n download-ubuntu-iso "${mb}M/2G"
-    sleep 0.75
+    sleep 0.95
   done
   claude-progress -n download-ubuntu-iso "done"
 }
 
 # One total, then +1 from six parallel workers.
 thumbnails() {
-  claude-progress -n thumbnails -t 120
+  claude-progress -n thumbnails -t 200
   # shellcheck disable=SC2016  # the worker shell expands these
-  seq 120 | xargs -P6 -I{} bash -c 'sleep "0.$((RANDOM % 9 + 10))"; claude-progress -n thumbnails +1'
+  seq 200 | xargs -P6 -I{} bash -c 'sleep "0.$((RANDOM % 9 + 10))"; claude-progress -n thumbnails +1'
   claude-progress -n thumbnails "done"
 }
 
@@ -47,7 +48,7 @@ scan() {
   sleep 12
   for ((i = 1; i <= 300; i++)); do
     if ((i % 10 == 0)); then claude-progress -n scan-library "$i/300"; fi
-    sleep 0.1
+    sleep 0.14
   done
   claude-progress -n scan-library "done"
 }
@@ -66,7 +67,7 @@ upload() {
   local i
   for ((i = 1; i <= 25; i++)); do
     claude-progress -n upload-to-nas "$i/60" "photo_$i.jpg"
-    sleep 0.8
+    sleep 1.6
   done
   claude-progress -n upload-to-nas fail "server returned 503"
 }
