@@ -395,6 +395,7 @@ wait_s=1
 ((BASH_VERSINFO[0] < 4)) || wait_s=0.2
 while :; do
   read_at=$SECONDS
+  line= # bash 3 leaves the old value after a timeout
   if IFS= read -r -t "$wait_s" line <&6; then
     line=$held$line held=
     case $line in

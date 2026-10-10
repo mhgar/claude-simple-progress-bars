@@ -31,7 +31,7 @@ Alternatives:
 Bash 5 has `EPOCHREALTIME`. The wrapper takes its digits and drops the last 3, for milliseconds. This also works in a locale with a decimal comma. Bash 3 and 4 fall back to `SECONDS * 1000`. Bash 3 cannot read with a timeout below 1 s, so on bash 3 a held tag waits at most 1 s. PowerShell uses its `Stopwatch`.
 
 ### Partial lines in bash
-When `read -t` times out in the middle of a line, bash puts the part that it read in the variable, and that part leaves the pipe. With a timeout of 1 s this was rare. With 0.2 s it is more likely, so the bash wrapper keeps the part, and puts it before the rest of the line at the next read.
+When `read -t` times out in the middle of a line, bash puts the part that it read in the variable, and that part leaves the pipe. With a timeout of 1 s this was rare. With 0.2 s it is more likely, so the bash wrapper keeps the part, and puts it before the rest of the line at the next read. Bash 3 leaves the old value in the variable after a timeout with no input, so the wrapper empties the variable before each read.
 
 ### End of input under bash 3
 Bash 4 and later return a status above 128 when `read -t` times out, and 1 at the end of input. Bash 3 returns 1 for both. A signal trap that interrupts the read gives a status above 128 in every version. The bash wrapper notes `SECONDS` before each read. Under bash 3, a status of 1 counts as the end of input only when `SECONDS` did not change during the read. A timeout always takes 1 s, so it always changes `SECONDS`. An end of input that crosses a second boundary costs one more read, which returns at once and ends the loop.

@@ -91,7 +91,7 @@ describe('settle', () => {
     const done = ingest(new Map(), [runFile(0, 'task 1 - r', '[1] done')], new Map())
     const hidden: Hidden = new Map()
 
-    const { bars: kept, expired } = settle(done, mtimes(0), 6000)
+    const { bars: kept, expired } = settle(done, mtimes(0), 11_000)
     hide(hidden, expired, mtimes(0))
 
     expect([kept.length, expired.length, hidden.get(`${F}#1`)]).toEqual([0, 1, Infinity])

@@ -72,7 +72,7 @@ The wrapper sets `PYTHONUNBUFFERED=1` for COMMAND, so local Python works without
 
 ## The bar
 - Status: `estimating…` until 3 counted updates or 2 s, then `~m:ss left`. `finishing…` at the total. `no update m:ss` (yellow) after 30 s with no tag. A subtask tag counts for its root.
-- `done`: green, gone after 5 s. `fail` and `stopped`: red, gone after 10 s. These times do not depend on the wrapper or COMMAND.
+- `done`: green. `fail` and `stopped`: red. Each goes 10 s after it ends. This time does not depend on the wrapper or COMMAND.
 - Each task has its own row, and the rows form a table with aligned columns. A root with subtasks is marked `▾`, and its subtasks are on the rows under it. A press on the row collapses its subtasks into `+N` with counts by state, marked `▸`. The band shows every row, and ends with `▴ show less` past 4 rows. A press on it keeps 4 rows and a `▸ N more: …` line. To press, click in fullscreen mode, or press `ctrl+x`, then `Tab`, then Enter on the row.
 - A running bar stays while its wrapper runs, however long a step takes. If the wrapper stops without a chance to write, as after `KILL`, the bar shows `stopped` after 15 s.
 

@@ -130,7 +130,7 @@ check "a count drops the text before it" "task 1 - r|[1] 3/9|[1] fail x|end|" "$
 CLAUDE_CODE_SESSION_ID=held "$P" -n r sh -c 'echo "[progress] 1/3"; echo "[progress] 2/3"; sleep 5' &
 w=$!
 await_file "$BASE/held"
-sleep 0.5
+sleep 1.5 # bash 3 reads whole seconds
 check "a held tag reaches the file" "[1] 2/3" "$(runfile held | cut -d'|' -f2)"
 wait $w
 # NTFS under Git Bash has no modes.

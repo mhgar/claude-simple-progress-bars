@@ -5,8 +5,8 @@ import type { Update } from './parse'
 export const STALL_MS = 30_000
 /** A run file that has not changed for this long belongs to a wrapper that is gone. */
 export const STALE_MS = 15_000
-const COMPLETE_HOLD_MS = 5_000
-const FAIL_HOLD_MS = 10_000
+/** An ended bar, done, failed, or stopped, shows for this long. */
+const HOLD_MS = 10_000
 const SMOOTHING = 0.3 // tqdm's default: the weight of the newest rate sample
 const ETA_HYSTERESIS = 0.1 // The shown estimate moves only on a change over 10%.
 
@@ -82,10 +82,9 @@ export function revive(bar: Bar): Bar {
 export function isExpired(bar: Bar, now: number): boolean {
   switch (bar.state) {
     case 'complete':
-      return now - (bar.endedAt ?? now) > COMPLETE_HOLD_MS
     case 'fail':
     case 'stopped':
-      return now - (bar.endedAt ?? now) > FAIL_HOLD_MS
+      return now - (bar.endedAt ?? now) > HOLD_MS
     case 'run':
       return false
   }

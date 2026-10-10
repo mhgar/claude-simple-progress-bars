@@ -15,13 +15,17 @@
 - [ ] 3.2 `tests/cli-test.sh`: check mode 700 only where the system has modes, not under Git Bash. Tests: the Windows CI job.
 - [ ] 3.3 Push the branch, and get all CI jobs green.
 
-## 4. Docs and release
+## 4. One hold time
 
-- [ ] 4.1 `USAGE.md`: the write rule in "How it works", and a note about batch files.
-- [ ] 4.2 `.claude-plugin/plugin.json`: version 1.2.2.
+- [ ] 4.1 `hooks/bar.ts`: a done, failed, or stopped bar goes 10 s after it ends. Tests: `tests/bar.test.ts` "isExpired", `tests/watch.test.ts` "splits off a complete bar after its hold".
 
-## 5. Checks
+## 5. Docs and release
 
-- [ ] 5.1 Run `tests/cli-test.sh` under Git Bash, with PowerShell 5.1 for the twin. Run `claude plugin test`, the type check, `claude plugin validate --strict`, and `openspec validate --strict`.
-- [ ] 5.2 Hands-on test on Windows through both the PowerShell path and the Git Bash path, with bars on screen.
-- [ ] 5.3 Archive the change into `openspec/specs`.
+- [ ] 5.1 `USAGE.md`: the write rule in "How it works", a note about batch files, and the hold time.
+- [ ] 5.2 `.claude-plugin/plugin.json`: version 1.2.2.
+
+## 6. Checks
+
+- [ ] 6.1 Run `tests/cli-test.sh` under Git Bash, with PowerShell 5.1 for the twin. Run `claude plugin test`, the type check, `claude plugin validate --strict`, and `openspec validate --strict`.
+- [ ] 6.2 Hands-on test on Windows through both the PowerShell path and the Git Bash path, with bars on screen.
+- [ ] 6.3 Archive the change into `openspec/specs`.

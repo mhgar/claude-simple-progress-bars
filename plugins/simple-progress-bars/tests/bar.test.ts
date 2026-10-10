@@ -80,8 +80,9 @@ describe('stale and revive', () => {
 describe('isExpired', () => {
   const ended = (state: 'done' | 'fail' | 'stopped') => run('job', [[{ done: 1, total: 2 }, 0], [{ state, done: 1, total: 2 }, 1]])
   const cases: [string, ReturnType<typeof run>, number, boolean][] = [
-    ['complete, at 5 s', ended('done'), 5001, false],
-    ['complete, after 5 s', ended('done'), 5002, true],
+    ['complete, after 5 s', ended('done'), 5002, false],
+    ['complete, at 10 s', ended('done'), 10_001, false],
+    ['complete, after 10 s', ended('done'), 10_002, true],
     ['failed, at 10 s', ended('fail'), 10_001, false],
     ['failed, after 10 s', ended('fail'), 10_002, true],
     ['stopped, after 10 s', ended('stopped'), 10_002, true],

@@ -16,7 +16,8 @@ A test on Windows 11 found two problems in the wrappers.
 - **One way to start COMMAND.** Outside a session, the PowerShell wrapper starts COMMAND with the same quoting as inside a session, with no redirection. COMMAND then has the console streams of the wrapper.
 - **Bash 3 end of input.** Under bash 3, the wrapper takes a status of 1 from `read -t` as the end of input only when the read returned in the same second that it started. Else it reads again.
 - **Tests on Windows.** The mode check runs only where the system has modes.
-- `USAGE.md`: the new write rule, and the batch file rule.
+- **One hold time.** A done bar goes after 10 s, as a failed or stopped bar does. One rule is easier to learn than two, and a done bar no longer goes before a person can read it. A stalled bar is still running, so it does not change.
+- `USAGE.md`: the new write rule, the batch file rule, and the hold time.
 - Release 1.2.2.
 
 ## Capabilities
@@ -26,11 +27,13 @@ None.
 
 ### Modified Capabilities
 - `progress-command`: the write rule in "Rewrite from memory", the quoting rule in "Never breaks a script", and a new requirement "Batch files".
+- `progress-tracking`: one hold time of 10 seconds in "Expiry".
 
 ## Impact
 
 - `scripts/claude-progress.sh`: write throttle, and a read timeout of 0.2 s on bash 4 and later.
 - `scripts/claude-progress.ps1`: write throttle, a wait of 200 ms, batch quoting, and one way to start COMMAND.
 - `USAGE.md`: "How it works", and a note about batch files.
+- `hooks/bar.ts`: one hold time.
 - `.claude-plugin/plugin.json`: version 1.2.2.
-- Tests: `tests/cli-test.sh`.
+- Tests: `tests/cli-test.sh`, `tests/bar.test.ts`, `tests/watch.test.ts`.
