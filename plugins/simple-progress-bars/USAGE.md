@@ -8,6 +8,7 @@ The wrapper runs COMMAND. COMMAND prints tag lines, and the wrapper turns them i
 
 ## Options
 - `-n`, `--name NAME`: the name of the root task. Default: the file name of COMMAND without its extension, so `./render.sh` gives `render`. Set it for `bash -c` and `ssh`.
+- Names: use a short name that a person reads, under 24 characters. The name column follows the longest name on screen, and cuts names past a quarter of the band width. Spaces are fine: `-n "Download Ubuntu"`, `[progress:Upload photos] 3/10`.
 - `--`: the end of the options.
 - `--dir`: print the progress directory.
 - `-h`, `--help`, or no arguments: print the help.
@@ -70,7 +71,7 @@ The wrapper sets `PYTHONUNBUFFERED=1` for COMMAND, so local Python works without
 ## The bar
 - Status: `estimating…` until 3 counted updates or 2 s, then `~m:ss left`. `finishing…` at the total. `no update m:ss` (yellow) after 30 s with no tag. A subtask tag counts for its root.
 - `done`: green, gone after 5 s. `fail` and `stopped`: red, gone after 10 s. These times do not depend on the wrapper or COMMAND.
-- A root with subtasks has its own row, marked `▾`. A press on the row collapses its subtasks into `+N` with counts by state, marked `▸`. The band shows every row, and ends with `▴ show less` past 4 rows. A press on it keeps 4 rows and a `▸ N more: …` line. To press, click in fullscreen mode, or press `ctrl+x`, then `Tab`, then Enter on the row.
+- Each task has its own row, and the rows form a table with aligned columns. A root with subtasks is marked `▾`, and its subtasks are on the rows under it. A press on the row collapses its subtasks into `+N` with counts by state, marked `▸`. The band shows every row, and ends with `▴ show less` past 4 rows. A press on it keeps 4 rows and a `▸ N more: …` line. To press, click in fullscreen mode, or press `ctrl+x`, then `Tab`, then Enter on the row.
 - A running bar stays while its wrapper runs, however long a step takes. If the wrapper stops without a chance to write, as after `KILL`, the bar shows `stopped` after 15 s.
 
 ## Background jobs

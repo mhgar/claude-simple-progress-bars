@@ -4,8 +4,6 @@ import { STALL_MS } from './bar'
 const NAME_MAX = 20
 const LABEL_MAX = 24
 const TRACK_MIN = 10
-const SEGMENT_MIN = 50 // the fewest cells one bar gets before the next bar goes to a new row
-const SEPARATOR = ' │ '
 const SWEEP_MS = 120 // one cell of the indeterminate segment's movement
 const SUB_INDENT = '    ' // subtask rows start 4 cells to the right of their root
 
@@ -206,56 +204,105 @@ export function counts(bars: readonly Bar[], now: number): string {
   return COUNT_ORDER.filter(w => n.has(w)).map(w => `${n.get(w)} ${w}`).join(', ')
 }
 
-/** One row before it is drawn. A root row of a block has a mark, and the bars behind its `+N`. */
-type Plan =
-  | { kind: 'bars'; bars: Bar[]; isSub: boolean }
-  | { kind: 'root'; root: Bar; isOpen: boolean; hidden: Bar[] }
+/** One bar on its own row: its mark, whether it is a subtask, and the subtasks behind its `+N`. */
+type Line = { bar: Bar; isSub: boolean; mark: string; hidden: Bar[] }
 
-/** Splits `bars` into `count` rows of balanced length. */
-function balance(bars: readonly Bar[], count: number, isSub: boolean): Plan[] {
-  const each = Math.ceil(bars.length / count)
-  return Array.from({ length: count }, (_, r): Plan => ({ kind: 'bars', bars: bars.slice(r * each, (r + 1) * each), isSub }))
-    .filter(row => row.kind === 'bars' && row.bars.length > 0)
+// The name and detail columns follow their longest value, up to these shares of the width.
+const NAME_SHARE = 0.25
+const LABEL_SHARE = 0.2
+const COLUMN_MIN = 8
+const GAP = '  '
+const GUTTER = 2 // cells for the mark of a root with subtasks
+
+/** The columns that a narrow band gives up, in order, until the track gets TRACK_MIN cells. */
+const NARROW_STEPS = ['counts', 'label', 'rate', 'count', 'elapsed', 'name', 'pct'] as const
+
+/** The raw texts of one row, before the table cuts or pads them. */
+type Texts = { name: string; label: string; count: string; pct: string; rate: string; elapsed: string; status: string; more: string; full: string }
+
+function textsOf(line: Line, now: number): Texts {
+  const isStalled = line.bar.state === 'run' && now - line.bar.activeAt > STALL_MS
+  const p = partsOf(line.bar, Number.MAX_SAFE_INTEGER, now, isStalled)
+  const more = line.hidden.length > 0 ? `+${line.hidden.length}` : ''
+  return {
+    name: line.bar.name, label: line.bar.label, count: p.count, pct: p.pct, rate: p.rate, elapsed: p.elapsed, status: p.status,
+    more, full: more ? `${more}: ${counts(line.hidden, now)}` : '',
+  }
 }
 
-/** Draws a row of bars in exactly `w` cells, with ` │ ` between them. */
-function drawBars(bars: readonly Bar[], w: number, now: number, isSub: boolean): Piece[] {
-  const sep = width(SEPARATOR)
-  const indent = isSub ? SUB_INDENT : ''
-  const room = w - width(indent)
-  const cell = Math.floor((room - sep * (bars.length - 1)) / bars.length)
-  const out: Piece[] = indent ? [{ text: indent }] : []
-  bars.forEach((bar, i) => {
-    if (i > 0) out.push({ text: SEPARATOR, dim: true })
-    out.push(...layout(bar, cell, now, isSub))
+const padEnd = (text: string, n: number) => text + ' '.repeat(Math.max(0, n - width(text)))
+const padStart = (text: string, n: number) => ' '.repeat(Math.max(0, n - width(text))) + text
+
+/**
+ * Draws the lines as one table. Every column has the width of its widest value,
+ * the name and detail columns up to a share of the width. The track gets what is
+ * left, but at most as much as the other columns together, so a wide band does
+ * not stretch the bars. A narrow band drops whole columns, so the rows stay aligned.
+ */
+function table(lines: readonly Line[], w: number, now: number): Piece[][] {
+  const texts = lines.map(l => textsOf(l, now))
+  const indentOf = (l: Line) => (l.isSub ? SUB_INDENT : '')
+  const widest = (pick: (t: Texts, i: number) => string) => texts.reduce((n, t, i) => Math.max(n, width(pick(t, i))), 0)
+  const dropped = new Set<string>()
+  let nameCap = Math.max(COLUMN_MIN, Math.floor(w * NAME_SHARE))
+  const labelCap = Math.max(COLUMN_MIN, Math.floor(w * LABEL_SHARE))
+
+  const measure = () => {
+    const col = (key: keyof Texts, cap = Infinity) => (dropped.has(key) ? 0 : Math.min(cap, widest(t => t[key])))
+    const widths = {
+      name: widest((t, i) => indentOf(lines[i] as Line) + truncate(t.name, nameCap)),
+      label: col('label', labelCap),
+      count: col('count'), pct: col('pct'), rate: col('rate'), elapsed: col('elapsed'), status: col('status'),
+      more: dropped.has('counts') ? widest(t => t.more) : widest(t => t.full),
+    }
+    const present = Object.values(widths).filter(n => n > 0)
+    const text = GUTTER + present.reduce((n, c) => n + c, 0) + width(GAP) * present.length // one gap for each column, the track's included
+    return { widths, text, track: Math.min(w - text, text) }
+  }
+
+  let m = measure()
+  for (const step of NARROW_STEPS) {
+    if (m.track >= TRACK_MIN) break
+    if (step === 'name') nameCap = COLUMN_MIN
+    else if (step === 'pct') dropped.add('pct').add('status')
+    else dropped.add(step)
+    m = measure()
+  }
+  const trackWidth = Math.max(1, Math.min(m.track, w - m.text))
+
+  return lines.map((line, i) => {
+    const t = texts[i] as Texts
+    const bar = line.bar
+    const isStalled = bar.state === 'run' && now - bar.activeAt > STALL_MS
+    const isQuiet = bar.state === 'run' && !isStalled
+    const color = colorOf(bar, isStalled)
+    const numberStyle = isQuiet ? { dim: true } : { color }
+    const out: Piece[] = [{ text: line.mark, dim: true }]
+    out.push(line.isSub
+      ? { text: padEnd(indentOf(line) + truncate(t.name, nameCap), m.widths.name), dim: true }
+      : { text: padEnd(truncate(t.name, nameCap), m.widths.name), bold: true })
+    if (m.widths.label > 0) {
+      out.push({ text: GAP }, { text: padEnd(truncate(t.label, m.widths.label), m.widths.label), ...(isQuiet || bar.state === 'complete' ? { dim: true } : { color }) })
+    }
+    out.push({ text: GAP }, ...track(bar, trackWidth, now, color))
+    for (const key of ['count', 'pct', 'rate', 'elapsed'] as const) {
+      if (m.widths[key] > 0) out.push({ text: GAP }, { text: padStart(t[key], m.widths[key]), ...numberStyle })
+    }
+    if (m.widths.status > 0) out.push({ text: GAP }, { text: padEnd(t.status, m.widths.status), ...numberStyle })
+    if (m.widths.more > 0) out.push({ text: GAP }, { text: padEnd(dropped.has('counts') ? t.more : t.full, m.widths.more), dim: true })
+    return out.filter(p => p.text !== '')
   })
-  return out
-}
-
-/** Draws the row of a root with subtasks: its mark, its bar, and `+N` for subtasks that do not show. */
-function drawRoot(p: Extract<Plan, { kind: 'root' }>, w: number, now: number): Piece[] {
-  const mark = p.isOpen ? MARK_OPEN : MARK_SHUT
-  const plus = p.hidden.length > 0 ? `  +${p.hidden.length}` : ''
-  const withCounts = plus ? `${plus}: ${counts(p.hidden, now)}` : ''
-  // The counts give way first, before any part of the bar.
-  const tail = plus && w - width(mark) - width(withCounts) >= SEGMENT_MIN ? withCounts : plus
-  const out: Piece[] = [{ text: mark, dim: true }, ...layout(p.root, w - width(mark) - width(tail), now)]
-  if (tail) out.push({ text: tail, dim: true })
-  return out
 }
 
 /**
- * Lays the bars out in rows of `w` cells. Each bar gets at least SEGMENT_MIN cells.
- * Groups go in start order: a root with subtasks gets a block, with a row of its own
- * and, while it is open, its subtasks in indented rows under it. Roots with no
- * subtasks pack together in balanced rows. The rows stay within the band's height,
- * or within 4 rows in a compact band, and a last line counts what does not show.
+ * Lays the bars out as a table with one bar on each row. Groups go in start order:
+ * a root with subtasks gets a block, with its subtasks on the rows under it while
+ * it is open, and roots with no subtasks follow each other. The rows stay within
+ * the band's height, or within 4 rows in a compact band, and a last line counts
+ * what does not show.
  */
 export function rows(bars: readonly Bar[], w: number, now: number, view: View): Row[] {
   if (bars.length === 0) return []
-  const sep = width(SEPARATOR)
-  const perRow = (cells: number) => Math.max(1, Math.floor((cells + sep) / (SEGMENT_MIN + sep)))
-  const subWidth = w - width(SUB_INDENT)
   const keys = new Set(bars.map(b => b.key))
   const subsOf = new Map<string, Bar[]>()
   const roots: Bar[] = []
@@ -275,9 +322,7 @@ export function rows(bars: readonly Bar[], w: number, now: number, view: View): 
     else groups.push({ run: [root] })
   }
   const isOpen = (g: { root: Bar }) => !view.collapsed.has(g.root.key)
-  const need = (g: Group) => 'run' in g
-    ? Math.ceil(g.run.length / perRow(w))
-    : 1 + (isOpen(g) ? Math.ceil(g.subs.length / perRow(subWidth)) : 0)
+  const need = (g: Group) => ('run' in g ? g.run.length : 1 + (isOpen(g) ? g.subs.length : 0))
 
   // The rows of bars, and the last line, from the height table.
   const total = groups.reduce((n, g) => n + need(g), 0)
@@ -287,37 +332,36 @@ export function rows(bars: readonly Bar[], w: number, now: number, view: View): 
 
   // Fill the rows group by group. After the first group that does not fit whole, the rest go to the last line.
   let left = limit
-  const plans: Plan[] = []
+  const lines: Line[] = []
   const unseen: Bar[] = []
   let isFull = false
   for (const g of groups) {
-    const members = 'run' in g ? g.run : [g.root, ...g.subs]
     if (isFull || left === 0) {
-      unseen.push(...members)
+      unseen.push(...('run' in g ? g.run : [g.root, ...g.subs]))
       isFull = true
       continue
     }
     if ('run' in g) {
-      const fit = Math.min(g.run.length, left * perRow(w))
-      const count = Math.ceil(fit / perRow(w))
-      plans.push(...balance(g.run.slice(0, fit), count, false))
+      const fit = Math.min(g.run.length, left)
+      for (const bar of g.run.slice(0, fit)) lines.push({ bar, isSub: false, mark: ' '.repeat(GUTTER), hidden: [] })
       unseen.push(...g.run.slice(fit))
-      left -= count
+      left -= fit
       isFull = fit < g.run.length
       continue
     }
     const open = isOpen(g)
-    const subRows = open ? Math.min(left - 1, Math.ceil(g.subs.length / perRow(subWidth))) : 0
-    const shown = open ? Math.min(g.subs.length, subRows * perRow(subWidth)) : 0
-    plans.push({ kind: 'root', root: g.root, isOpen: open, hidden: g.subs.slice(shown) })
-    if (subRows > 0) plans.push(...balance(g.subs.slice(0, shown), subRows, true))
-    left -= 1 + subRows
+    const shown = open ? Math.min(left - 1, g.subs.length) : 0
+    lines.push({ bar: g.root, isSub: false, mark: open ? MARK_OPEN : MARK_SHUT, hidden: g.subs.slice(shown) })
+    for (const bar of g.subs.slice(0, shown)) lines.push({ bar, isSub: true, mark: ' '.repeat(GUTTER), hidden: [] })
+    left -= 1 + shown
     isFull = open && shown < g.subs.length
   }
 
-  const out: Row[] = plans.map(p => p.kind === 'root'
-    ? { pieces: drawRoot(p, w, now), target: { root: p.root.key } }
-    : { pieces: drawBars(p.bars, w, now, p.isSub) })
+  const drawn = table(lines, w, now)
+  const out: Row[] = lines.map((line, i) => ({
+    pieces: drawn[i] ?? [],
+    target: line.mark.trim() !== '' ? { root: line.bar.key } : undefined,
+  }))
   if (fitsWhole) return out
 
   const more = unseen.length > 0 ? `${unseen.length} more: ${counts(unseen, now)}` : ''

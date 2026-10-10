@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Fake tasks that show each kind of bar, for about 75 seconds. Each task runs
 # through the claude-progress wrapper, and prints tag lines.
+# From about 39 s to 44 s, bars show running, stalled, failed, stopped, and done
+# at the same time, while most tasks still run.
 # Run it in a Claude Code session with the plugin enabled: ! examples/demo.sh
 set -u
 WRAPPER=$(cd "$(dirname "$0")/.." && pwd)/plugins/simple-progress-bars/scripts/claude-progress.sh
@@ -9,10 +11,11 @@ if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
   exit 1
 fi
 
-# task NAME FUNCTION: runs FUNCTION through the wrapper, with no output.
-task() { bash "$WRAPPER" -n "$1" bash -c "$(declare -f "$2"); $2" > /dev/null 2>&1; }
+# task NAME FUNCTION: runs FUNCTION through the wrapper, with no output. The wrapper
+# takes the place of the subshell, so $! after `task ... &` is the wrapper's pid.
+task() { exec bash "$WRAPPER" -n "$1" bash -c "$(declare -f "$2"); $2" > /dev/null 2>&1; }
 
-# A count with detail text, at an uneven speed.
+# Running to the end: a count with detail text, at an uneven speed. About 75 s.
 convert() {
   local n=90 i
   for ((i = 1; i <= n; i++)); do
@@ -22,7 +25,7 @@ convert() {
   echo "[progress] done"
 }
 
-# Sizes, with a rate.
+# Running to the end: sizes, with a rate. About 61 s.
 download() {
   local mb
   for ((mb = 0; mb <= 2048; mb += 32)); do
@@ -32,14 +35,14 @@ download() {
   echo "[progress] done"
 }
 
-# A root task with subtasks: frames, then an upload of each batch.
+# Running to the end: a root task with subtasks, frames and then an upload of each batch. About 50 s.
 render() {
   local batch frame
   echo "[progress] 0/3 batches"
   for ((batch = 1; batch <= 3; batch++)); do
     for ((frame = 1; frame <= 24; frame++)); do
       echo "[progress:frames] $frame/24 batch $batch"
-      sleep 0.15
+      sleep 0.6
     done
     echo "[progress:frames] done"
     echo "[progress:upload] 0/3"
@@ -50,7 +53,7 @@ render() {
   echo "[progress] done 72 frames"
 }
 
-# Text first, with no total, then a count.
+# Running to the end: text first, with no total, then a count. About 54 s.
 scan() {
   local i
   echo "[progress] Scanning library"
@@ -62,26 +65,49 @@ scan() {
   echo "[progress] done"
 }
 
-# A script that stops reporting at 40 of 100: the bar shows "no update" after 30 s.
+# Stalled: no tag after about 8 s, so the bar shows "no update" from about 38 s.
 stalled() {
   local i
   for ((i = 1; i <= 40; i++)); do
     echo "[progress] $i/100"
-    sleep 0.3
+    sleep 0.2
   done
-  sleep 60
+  sleep 62
 }
 
-# A task that fails with a message.
+# Failed: a fail tag at about 37 s. A failed bar stays 10 s.
 upload() {
   local i
   for ((i = 1; i <= 25; i++)); do
     echo "[progress] $i/60 photo_$i.jpg"
-    sleep 1.6
+    sleep 1.5
   done
   echo "[progress] fail server returned 503"
 }
 
-task convert-videos convert & task download-ubuntu-iso download & task render-shots render &
-task scan-library scan & task stalled-script stalled & task upload-to-nas upload &
+# Done: complete at about 39 s. A done bar stays 5 s.
+thumbnails() {
+  local i
+  for ((i = 1; i <= 120; i++)); do
+    echo "[progress] $i/120"
+    sleep 0.325
+  done
+  echo "[progress] done"
+}
+
+# Stopped: the demo sends TERM to its wrapper at 38 s. Short sleeps let it end at once.
+backup() {
+  local i
+  for ((i = 1; i <= 400; i++)); do
+    echo "[progress] $i/400 table_$i"
+    sleep 0.5
+  done
+}
+
+task "Convert videos" convert & task "Download Ubuntu" download & task "Render shots" render &
+task "Scan library" scan & task "Stalled script" stalled & task "Upload photos" upload &
+task Thumbnails thumbnails & task "Back up DB" backup &
+backup_pid=$!
+sleep 38
+kill -TERM "$backup_pid" 2>/dev/null
 wait

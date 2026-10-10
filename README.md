@@ -1,6 +1,6 @@
 # Simple Progress Bars
 
-![Progress bars above the Claude Code prompt: two running tasks with time estimates, one with a transfer size, a stalled task, a finished task in green, and a failed upload in red](plugins/simple-progress-bars/assets/screenshot.png)
+![Progress bars above the Claude Code prompt, one task per row in aligned columns: running tasks with time estimates and a transfer rate, a stalled task in yellow, a finished task in green, a failed upload and a stopped backup in red, and a render task with a subtask on an indented row under it](plugins/simple-progress-bars/assets/screenshot.png)
 
 Progress bars for the long scripts that Claude Code runs.
 
@@ -78,7 +78,7 @@ Version 1.1.0 replaced the per-call command, the Python and Node twins, and the 
 
 ## Reading a bar
 
-Each bar shows the task name, its detail text, the count, the percent, the time so far, and the time left. A task measured in bytes also shows its transfer rate. A task with subtasks has a row of its own, and its subtasks show on indented rows under it.
+Each task has a row of its own, and the rows form a table: the name, its detail text, the bar, the count, the percent, the time so far, and the time left line up in columns. A task measured in bytes also shows its transfer rate. The subtasks of a task show on indented rows under it. On a wide terminal the bars stop growing, so the table does not stretch across the whole screen.
 
 The color tells you the state:
 

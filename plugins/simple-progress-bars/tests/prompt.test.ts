@@ -30,6 +30,12 @@ describe('promptSection', () => {
     }
   })
 
+  test('asks for short names that a person reads, with spaces', () => {
+    const text = promptSection(30, ROOT, false)
+    expect(text).toContain('a short name that a person reads, under 24 characters')
+    expect(text).toContain('`-n "Download Ubuntu"`')
+  })
+
   test('asks for an end of each task', () => {
     expect(promptSection(30, ROOT, false)).toContain('End each task with `done` or `fail`.')
   })

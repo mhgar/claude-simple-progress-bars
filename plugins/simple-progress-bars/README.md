@@ -1,6 +1,6 @@
 # Simple Progress Bars
 
-![Progress bars above the Claude Code prompt: two running tasks with time estimates, one with a transfer size, a stalled task, a finished task in green, and a failed upload in red](assets/screenshot.png)
+![Progress bars above the Claude Code prompt, one task per row in aligned columns: running tasks with time estimates and a transfer rate, a stalled task in yellow, a finished task in green, a failed upload and a stopped backup in red, and a render task with a subtask on an indented row under it](assets/screenshot.png)
 
 Progress bars with time estimates for the long scripts that Claude Code runs. Claude runs a command through the `claude-progress` wrapper, and the command prints tag lines, for example `[progress] 17/240`. A bar with the count, the percent, the elapsed time, and a time estimate shows in the band above the prompt of Claude Code. Tag lines never reach Claude, so they cost zero tokens.
 

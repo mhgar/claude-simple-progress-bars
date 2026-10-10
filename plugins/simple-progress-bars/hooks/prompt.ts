@@ -7,6 +7,7 @@ export function promptSection(minSeconds: number, root: string, hasPowerShell: b
     '',
     `Without being asked, run every command that makes the person wait more than about ${minSeconds} seconds through it: loops, chains of commands, inline scripts, test runs, batches, transfers, background jobs, and jobs on a remote server. If you are not sure that it is quick, use it.`,
     `Command: \`bash "${root}/scripts/claude-progress.sh" -n NAME COMMAND [ARGS...]\`. A chain: \`-n NAME bash -c '...'\`. A remote job: \`-n NAME ssh HOST '...'\`.`,
+    'Give the task and each subtask a short name that a person reads, under 24 characters. Spaces are fine: `-n "Download Ubuntu"`, `[progress:Upload photos] 3/10`.',
     'The command prints tag lines. A tag starts the line: `[progress] VALUE` for the task, `[progress:SUB] VALUE` for a subtask. Flush the output after each tag. Tag lines never reach the output.',
     '- `3/8`: items or steps done',
     '- `1.5G/4G`: bytes of a transfer',

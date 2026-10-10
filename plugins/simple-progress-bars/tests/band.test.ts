@@ -55,8 +55,7 @@ describe('the band above the prompt', () => {
 
     const ui = await $.ui.mount(band())
     expect(await ui.find({ type: 'Text', text: /render/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^ {4}$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /frames/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^ {4}frames/ })).toBeDefined()
   })
 
   test('draws nothing for a half-written run file', async ($, on) => {
@@ -116,7 +115,7 @@ describe('presses in the band', () => {
   })
 
   test('a press on the last line makes the band compact, and a second press expands it', async ($, on) => {
-    // Nine roots, two to a row in 120 columns: five rows of bars.
+    // Nine roots, one to a row: nine rows of bars, and the band is 10 rows high.
     const files = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`${100 + i}-1700000000`, `task 1 - job${i}\n[1] 1/2\nend\n`]))
     const clock = world(on, files)
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -125,7 +124,7 @@ describe('presses in the band', () => {
     expect(await ui.find({ type: 'Text', text: /show less/ })).toBeDefined()
 
     await ui.press({ key: 'band' })
-    expect(await ui.find({ type: 'Text', text: /▸ 1 more: 1 running/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▸ 5 more: 5 running/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /job8/ })).toBeUndefined()
 
     await ui.press({ key: 'band' })

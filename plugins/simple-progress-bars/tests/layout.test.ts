@@ -80,26 +80,61 @@ const lines = (out: Row[]) => out.map(r => text(r.pieces))
 const bar = (name: string, fields: object = { done: 1, total: 10 }, root: string | null = null) => run(name, [[fields, 0]], root)
 
 describe('rows', () => {
-  const bars = 'abcdefghijkl'.split('').map(n => bar(n))
-  const perRow = (w: number, n: number) => lines(rows(bars.slice(0, n), w, 0, view())).map(l => l.split('│').length)
+  const bars = 'abcdefgh'.split('').map(n => bar(n))
 
-  const cases: [number, number, number[]][] = [
-    [200, 3, [3]], // three fit on one row
-    [200, 4, [2, 2]], // balanced, not 3 and 1
-    [100, 2, [1, 1]], // one bar a row under 103 cells
-  ]
-  for (const [w, n, expected] of cases) {
-    test(`${n} bars in ${w} cells make rows of ${expected.join(' and ')}`, () => {
-      expect(perRow(w, n)).toEqual(expected)
-    })
-  }
+  test('each bar has a row of its own, at every width', () => {
+    for (const w of [60, 120, 300]) expect(rows(bars.slice(0, 4), w, 0, view()).length).toBe(4)
+  })
 
-  test('keeps every row inside the width', () => {
-    for (const line of lines(rows(bars.slice(0, 4), 200, 0, view()))) expect(width(line)).toBeLessThanOrEqual(200)
+  test('every row has the same width, inside the band', () => {
+    const list = [bar('Convert videos', { done: 64, total: 90, detail: 'clip_064.mkv' }), bar('Thumbnails', { done: 120, total: 120 })]
+    for (const w of [40, 120, 300]) {
+      const widths = lines(rows(list, w, 0, view())).map(l => width(l))
+      expect(new Set(widths).size).toBe(1)
+      expect(widths[0]).toBeLessThanOrEqual(w)
+    }
+  })
+
+  test('aligns the tracks and the percents of all rows', () => {
+    const list = [bar('Convert videos', { done: 64, total: 90 }), bar('Thumbnails', { done: 120, total: 120 })]
+
+    const [one, two] = lines(rows(list, 160, 0, view()))
+
+    expect(one?.indexOf('━')).toBe(two?.indexOf('━'))
+    expect(one?.indexOf('%')).toBe(two?.indexOf('%'))
+  })
+
+  test('the name column follows the longest name on screen', () => {
+    const short = lines(rows([bar('ab'), bar('cd')], 200, 0, view()))[0] ?? ''
+    const long = lines(rows([bar('ab'), bar('a longer name')], 200, 0, view()))[0] ?? ''
+
+    expect(long.indexOf('━') - short.indexOf('━')).toBe('a longer name'.length - 2)
+  })
+
+  test('cuts a name past a quarter of the width', () => {
+    const out = lines(rows([bar('Download the Ubuntu desktop image')], 100, 0, view()))[0] ?? ''
+
+    expect(out.startsWith('  Download the Ubuntu desk… ')).toBe(true) // 25 cells of name
+  })
+
+  test('the track is at most as wide as the other columns, so a wide band does not stretch it', () => {
+    const out = lines(rows([bar('Thumbnails', { done: 1, total: 4 })], 300, 0, view()))[0] ?? ''
+    const trackCells = [...out].filter(ch => ch === '━' || ch === '─' || ch === '╸').length
+
+    expect(trackCells).toBe(width(out) - trackCells)
+  })
+
+  test('a narrow band drops whole columns, and keeps the gutter, the name, and the track', () => {
+    const list = [bar('Convert videos', { done: 64, total: 90, detail: 'clip_064.mkv' }), bar('Thumbnails', { done: 3, total: 4 })]
+
+    const out = lines(rows(list, 30, 0, view()))
+
+    expect(out[0]).toMatch(/^ {2}Convert… {2}[━─╸]+$/)
+    expect(out[1]).toMatch(/^ {2}Thumbna… {2}[━─╸]+$/)
   })
 
   test('roots with no subtasks are no buttons', () => {
-    expect(rows(bars.slice(0, 2), 200, 0, view()).map(r => r.target)).toEqual([undefined])
+    expect(rows(bars.slice(0, 2), 200, 0, view()).map(r => r.target)).toEqual([undefined, undefined])
   })
 })
 
@@ -119,13 +154,13 @@ describe('rows with subtasks', () => {
   const root = bar('render', { done: 2, total: 10 })
   const sub = (name: string, fields: object = { done: 1, total: 4 }) => bar(name, fields, root.key)
 
-  test('a root with subtasks gets its own row with an open mark, and its subtasks an indented row under it', () => {
+  test('a root with subtasks has an open mark, and each subtask a row under it, 4 cells to the right', () => {
     const out = lines(rows([root, sub('frames'), sub('upload')], 200, 0, view()))
 
-    expect(out.length).toBe(2)
+    expect(out.length).toBe(3)
     expect(out[0]?.startsWith('▾ render')).toBe(true)
-    expect(out[1]?.startsWith('    frames')).toBe(true)
-    expect(out[1]).toContain('upload')
+    expect(out[1]?.startsWith('      frames')).toBe(true)
+    expect(out[2]?.startsWith('      upload')).toBe(true)
   })
 
   test('the root row is a button with the key of its root', () => {
@@ -135,12 +170,8 @@ describe('rows with subtasks', () => {
   test('draws a subtask name dim, and a root name bold', () => {
     const [rootRow, subRow] = rows([root, sub('frames')], 200, 0, view())
 
-    expect(rootRow?.pieces.find(p => p.text === 'render ')).toMatchObject({ bold: true })
-    expect(subRow?.pieces.find(p => p.text === 'frames ')).toMatchObject({ dim: true })
-  })
-
-  test('keeps every row of a block inside the width', () => {
-    for (const line of lines(rows([root, sub('a'), sub('b'), sub('c')], 120, 0, view()))) expect(width(line)).toBeLessThanOrEqual(120)
+    expect(rootRow?.pieces.find(p => p.text.startsWith('render'))).toMatchObject({ bold: true })
+    expect(subRow?.pieces.find(p => p.text.includes('frames'))).toMatchObject({ dim: true })
   })
 
   test('a collapsed root shows one row, with a shut mark and its subtasks counted by state', () => {
@@ -150,20 +181,20 @@ describe('rows with subtasks', () => {
 
     expect(out.length).toBe(1)
     expect(out[0]?.startsWith('▸ render')).toBe(true)
-    expect(out[0]?.endsWith('+3: 1 running, 1 failed, 1 done')).toBe(true)
+    expect(out[0]?.trimEnd().endsWith('+3: 1 running, 1 failed, 1 done')).toBe(true)
   })
 
   test('a narrow collapsed root drops the counts first', () => {
     const out = lines(rows([root, sub('a'), sub('b'), sub('c')], 60, 0, view({ collapsed: [root.key] })))
 
-    expect(out[0]?.endsWith('+3')).toBe(true)
+    expect(out[0]?.trimEnd().endsWith('+3')).toBe(true)
     expect(width(out[0] ?? '')).toBeLessThanOrEqual(60)
   })
 
-  test('a root whose subtasks have all hidden packs as a normal bar', () => {
-    const out = lines(rows([root, bar('tests')], 200, 0, view()))
+  test('a root whose subtasks have all hidden shows as a normal bar', () => {
+    const out = rows([root, bar('tests')], 200, 0, view())
 
-    expect(out).toEqual([expect.stringMatching(/^render .*│ tests /)])
+    expect(out.map(r => r.target)).toEqual([undefined, undefined])
   })
 
   test('a quiet root with a busy subtask is not stalled', () => {
@@ -174,7 +205,6 @@ describe('rows with subtasks', () => {
 })
 
 describe('band states and the last line', () => {
-  // 7 roots, one a row in 100 cells: 7 rows of bars.
   const seven = 'abcdefg'.split('').map(n => bar(n))
 
   test('four rows or fewer have no last line, in either state', () => {
@@ -194,13 +224,10 @@ describe('band states and the last line', () => {
 
     expect(out.length).toBe(5)
     expect(text(out[4]?.pieces ?? [])).toBe('▸ 3 more: 3 running')
-    expect(out[4]?.target).toEqual({ band: true })
   })
 
   test('a band taller than its height joins show less and the count', () => {
-    const nine = 'abcdefghi'.split('').map(n => bar(n))
-
-    const out = rows(nine, 100, 0, view({ height: 6 }))
+    const out = rows('abcdefghi'.split('').map(n => bar(n)), 100, 0, view({ height: 6 }))
 
     expect(out.length).toBe(6)
     expect(text(out[5]?.pieces ?? [])).toBe('▴ show less · 4 more: 4 running')
@@ -221,26 +248,22 @@ describe('overflow', () => {
     const out = lines(rows([root, ...subs, bar('encode'), bar('tests')], 120, 0, view({ isCompact: true })))
 
     expect(out.length).toBe(5)
-    expect(out[0]?.startsWith('▾ render')).toBe(true)
-    expect(out[0]?.endsWith('+2: 2 running')).toBe(true)
+    expect(out[0]?.trimEnd().endsWith('+5: 5 running')).toBe(true)
     expect(out[4]).toBe('▸ 2 more: 2 running')
   })
 
   test('a later small group never moves up to fill a gap', () => {
-    const big = [root, ...subs.slice(0, 5)] // 1 root row and 3 subtask rows in 120 cells: 4 rows
-    const out = lines(rows([bar('first'), ...big, bar('last')], 120, 0, view({ isCompact: true })))
+    const out = lines(rows([bar('first'), root, ...subs.slice(0, 3), bar('last')], 120, 0, view({ isCompact: true })))
 
-    expect(out.some(l => l.startsWith('last'))).toBe(false)
-    expect(out[1]?.endsWith('+1: 1 running')).toBe(true)
+    expect(out.some(l => l.includes('last'))).toBe(false)
+    expect(out[1]?.trimEnd().endsWith('+1: 1 running')).toBe(true)
     expect(out[out.length - 1]).toBe('▸ 1 more: 1 running')
   })
 
   test('a run that does not fit whole shows the roots that fit', () => {
-    const many = 'abcdef'.split('').map(n => bar(n))
+    const out = lines(rows('abcdef'.split('').map(n => bar(n)), 100, 0, view({ isCompact: true })))
 
-    const out = lines(rows(many, 100, 0, view({ isCompact: true })))
-
-    expect(out.slice(0, 4).map(l => l[0])).toEqual(['a', 'b', 'c', 'd'])
+    expect(out.slice(0, 4).map(l => l.trim()[0])).toEqual(['a', 'b', 'c', 'd'])
     expect(out[4]).toBe('▸ 2 more: 2 running')
   })
 
