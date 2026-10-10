@@ -26,6 +26,8 @@ check() {
 }
 
 exists() { [ -e "$1" ] && echo yes || echo no; }
+# await_file DIR: waits up to 10 s for a run file in DIR. The first write also sweeps old sessions.
+await_file() { local i; for ((i = 0; i < 100; i++)); do [ -n "$(find "$1" -type f ! -name '.*' 2>/dev/null)" ] && return; sleep 0.1; done; }
 yes_if() { if "$@"; then echo yes; else echo no; fi; }
 matches() { [[ $1 =~ $2 ]]; }
 # runs SESSION: the number of run files in a session directory.
@@ -48,6 +50,7 @@ check "a missing command warns" "claude-progress: no-such-command-xyz: command n
 check "standard input reaches the command" piped "$(echo piped | wrap stdin cat)"
 check "standard error stays on standard error" "out|" "$(wrap streams sh -c 'echo out; echo bad >&2' 2>/dev/null | tr '\n' '|')"
 check "a tag on standard error counts" "task 1 - err|[1] 1/3|[1] done|end|" "$(wrap err -n err sh -c 'echo "[progress] 1/3" >&2' 2>/dev/null; runfile err)"
+check "a quiet command keeps its wrapper" "late|exit 5|" "$(wrap quiet sh -c 'sleep 2.5; echo late; exit 5' | tr '\n' '|'; echo "exit ${PIPESTATUS[0]}|")"
 check "a last line with no line end stays so" "a|b" "$(wrap partial printf 'a\nb' | tr '\n' '|')"
 check "the command gets PYTHONUNBUFFERED=1" 1 "$(wrap env sh -c 'echo "$PYTHONUNBUFFERED"')"
 
@@ -124,7 +127,14 @@ wrap looks -n r sh -c 'echo "[progress] 2/10"; echo "[progress] +1 3/8 files"; e
 check "a detail that looks like a count is written as +0" "[1] 2/10|[1] +1|[1] +0 3/8 files" "$(runfile looks | cut -d'|' -f2-4)"
 wrap textfirst -n r sh -c 'echo "[progress] Scanning"; echo "[progress] 3/9"; echo "[progress] fail x"'
 check "a count drops the text before it" "task 1 - r|[1] 3/9|[1] fail x|end|" "$(runfile textfirst)"
-check "the session directory is private" 700 "$(stat -c %a "$BASE/format" 2>/dev/null || stat -f %Lp "$BASE/format")"
+CLAUDE_CODE_SESSION_ID=held "$P" -n r sh -c 'echo "[progress] 1/3"; echo "[progress] 2/3"; sleep 5' &
+w=$!
+await_file "$BASE/held"
+sleep 0.5
+check "a held tag reaches the file" "[1] 2/3" "$(runfile held | cut -d'|' -f2)"
+wait $w
+# NTFS under Git Bash has no modes.
+[ -z "$IS_WINDOWS" ] && check "the session directory is private" 700 "$(stat -c %a "$BASE/format" 2>/dev/null || stat -f %Lp "$BASE/format")"
 
 # --- The heartbeat
 
@@ -239,6 +249,21 @@ echo "[progress:gone] clear"; echo "[progress] fail boom"; exit 3'
   check "PowerShell outside a session passes tags through and keeps the status" "[progress] 1/2|exit 4|" "$(printf '%s\n' "$out" | tr '\n' '|')"
   out=$("$PS" -NoProfile -ExecutionPolicy Bypass -File "$(native "$ROOT/scripts/claude-progress.ps1")" no-such-command-xyz 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
   check "PowerShell exits 127 for a missing command" "claude-progress: no-such-command-xyz: command not found|exit 127|" "$(printf '%s\n' "$out" | tr '\n' '|')"
+  CLAUDE_CONFIG_DIR=$(native "$TMP/held-ps") CLAUDE_CODE_SESSION_ID=held "$PS" -NoProfile -ExecutionPolicy Bypass \
+    -File "$(native "$ROOT/scripts/claude-progress.ps1")" -n r "$(native "$BASH_EXE")" -c 'echo "[progress] 1/3"; echo "[progress] 2/3"; sleep 5' &
+  w=$!
+  await_file "$TMP/held-ps/progress/held"
+  sleep 0.5
+  check "PowerShell: a held tag reaches the file" "[1] 2/3" "$(cat "$TMP"/held-ps/progress/held/* 2>/dev/null | sed -n 2p)"
+  wait $w
+  if [ -n "$IS_WINDOWS" ]; then
+    # cmd.exe reads the command line of a batch file first. Each argument must reach the script as text.
+    { printf '@echo off\r\nsetlocal EnableDelayedExpansion\r\n'
+      for i in 1 2 3 4 5 6; do printf 'set "a=%%~%s"\r\necho(!a!\r\n' "$i"; done; } > "$TMP/args.cmd"
+    out=$(CLAUDE_CONFIG_DIR=$(native "$TMP/batch-ps") CLAUDE_CODE_SESSION_ID=batch "$PS" -NoProfile -ExecutionPolicy Bypass -File "$(native "$ROOT/scripts/claude-progress.ps1")" \
+      "$(native "$TMP/args.cmd")" 'a&b' 'two words' '%PATH%' 'x=y' 'p|q^r(s)' 'say "hi"' 2>&1 | tr -d '\r')
+    check "PowerShell passes batch arguments as text" 'a&b|two words|%PATH%|x=y|p|q^r(s)|say ""hi""|' "$(printf '%s\n' "$out" | tr '\n' '|')"
+  fi
 fi
 
 echo "$passed passed, $failed failed"

@@ -4,8 +4,8 @@
 # The wrapper reads the output of COMMAND. A line that starts with [progress] or
 # [progress:NAME] updates a task and never reaches the output. The wrapper holds the
 # tasks in memory, and rewrites one run file, <dir>/<session id>/<pid>-<start>, after
-# each tag and at least every 5 seconds. The plugin reads that file. The plugin gives
-# Claude this file's path:
+# a tag, at most every 0.2 seconds, and at least every 5 seconds. The plugin reads that
+# file. The plugin gives Claude this file's path:
 #   bash "<plugin>/scripts/claude-progress.sh" -n render ./render.sh
 
 usage() {
@@ -268,6 +268,19 @@ tag() {
 file=
 no_file=
 last_write=0
+# The plugin reads run files 4 times a second, so more writes only slow COMMAND down.
+write_ms=200
+last_ms=-1000000
+dirty=
+
+now_ms() { # sets now to a clock in milliseconds, with no new process. Bash 3 counts whole seconds.
+  if [ -n "${EPOCHREALTIME-}" ]; then
+    now=${EPOCHREALTIME//[!0-9]/}
+    now=${now:0:${#now}-3}
+  else
+    now=$((SECONDS * 1000))
+  fi
+}
 
 open_file() { # creates the session directory and names the run file, at the first tag
   [ -z "$file" ] && [ -z "$no_file" ] || return 0
@@ -307,6 +320,9 @@ write_file() { # rewrites the whole run file from memory, with no new process
     no_file=1 file=
   fi
   last_write=$SECONDS
+  dirty=
+  now_ms
+  last_ms=$now
 }
 
 finish() { # LINE STATE: ends each running task, and writes the file
@@ -373,8 +389,14 @@ trap on_exit EXIT
 
 status=
 last=
+held=
+# Bash 3 reads whole seconds only.
+wait_s=1
+((BASH_VERSINFO[0] < 4)) || wait_s=0.2
 while :; do
-  if IFS= read -r -t 1 line <&6; then
+  read_at=$SECONDS
+  if IFS= read -r -t "$wait_s" line <&6; then
+    line=$held$line held=
     case $line in
       "$token pid "*) child=${line#"$token pid "} ;;
       "$token exit "*) status=${line#"$token exit "} ;;
@@ -384,7 +406,7 @@ while :; do
           open_file
           if [ -z "$tag_name" ]; then use_root; else use_sub "$tag_name"; fi
           apply_value "$tag_value"
-          write_file
+          dirty=1
         else
           case ${line:0:1} in
             o) printf '%s\n' "$text" 2>/dev/null ;;
@@ -395,8 +417,15 @@ while :; do
           [ -z "${text%$'\r'}" ] || last=${text%$'\r'}
         fi ;;
     esac
-  elif [ $? -le 128 ]; then
-    break # the pipe closed: both streams are at their end
+  else
+    # Above 128: a timeout or a signal. Bash 3 returns 1 also for a timeout, but a
+    # timeout takes 1 s. So 1 in the same second is the end: the pipe closed.
+    if [ $? -le 128 ] && { ((BASH_VERSINFO[0] >= 4)) || ((SECONDS == read_at)); }; then break; fi
+    held+=$line # a timeout keeps the part of a line that it read
+  fi
+  if [ -n "$dirty" ]; then
+    now_ms
+    ((now - last_ms < write_ms)) || write_file
   fi
   if [ -n "$file" ] && ((SECONDS - last_write >= 5)); then write_file; fi
 done

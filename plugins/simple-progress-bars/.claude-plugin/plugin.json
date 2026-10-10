@@ -1,7 +1,7 @@
 {
   "name": "simple-progress-bars",
   "displayName": "Simple Progress Bars",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Progress bars with time estimates for long scripts that Claude runs, also on remote servers. Scripts print tag lines such as [progress] 17/240.",
   "author": {
     "name": "Max Hunter",

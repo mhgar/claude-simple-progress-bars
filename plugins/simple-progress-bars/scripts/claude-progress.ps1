@@ -86,6 +86,15 @@ function ConvertTo-Argument([string]$Arg) {
   return $out + ('\' * ($slashes * 2)) + '"'
 }
 
+# Quotes one argument for a .cmd or .bat file. cmd.exe reads the command line before the
+# script does: it splits at & | < > ^ ( ), and expands %NAME%. Inside quotes these are
+# text. "" keeps a quote inside quotes. A % gets an empty %cd:~,% after it, so no name
+# can follow it.
+function ConvertTo-BatchArgument([string]$Arg) {
+  if ($Arg -ne '' -and $Arg -notmatch '[\s"&|<>^(),;=%]') { return $Arg }
+  return '"' + ($Arg -replace '"', '""' -replace '%', '%%cd:~,%') + '"'
+}
+
 # --- Arguments ---------------------------------------------------------------
 
 $configDir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
@@ -116,10 +125,7 @@ $cmdArgs = @($command | Select-Object -Skip 1)
 
 # A session ID is a plain name. Outside a session, the command runs as it is.
 $session = [string]$env:CLAUDE_CODE_SESSION_ID
-if ($session -notmatch '^[A-Za-z0-9_-]+$') {
-  & $command[0] @cmdArgs
-  exit $LASTEXITCODE
-}
+$inSession = $session -match '^[A-Za-z0-9_-]+$'
 
 if (-not $rootName) {
   $leaf = ($command[0] -split '[\\/]')[-1]
@@ -234,6 +240,10 @@ function Get-Tag([string]$Line) {
 $script:file = ''
 $script:noFile = $false
 $script:lastWrite = [long]0
+# The plugin reads run files 4 times a second, so more writes only slow COMMAND down.
+$writeMs = 200
+$script:lastWriteMs = [long]-1000000
+$script:dirty = $false
 $utf8 = New-Object Text.UTF8Encoding $false
 
 function Open-File {
@@ -275,6 +285,8 @@ function Write-RunFile {
     $script:noFile = $true; $script:file = ''
   }
   $script:lastWrite = $now
+  $script:lastWriteMs = $clock.ElapsedMilliseconds
+  $script:dirty = $false
 }
 
 function Complete-Run([string]$Line, [string]$State) {
@@ -285,8 +297,9 @@ function Complete-Run([string]$Line, [string]$State) {
 # --- Run ---------------------------------------------------------------------
 
 $info = New-Object Diagnostics.ProcessStartInfo
+$isBatch = $false
 switch ($found.CommandType) {
-  'Application' { $info.FileName = $found.Source; $argList = $cmdArgs }
+  'Application' { $info.FileName = $found.Source; $argList = $cmdArgs; $isBatch = $found.Source -match '\.(cmd|bat)$' }
   'ExternalScript' {
     $info.FileName = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $found.Source) + $cmdArgs
@@ -297,8 +310,15 @@ switch ($found.CommandType) {
     $argList = @('-NoProfile', '-Command', "& $($quoted -join ' ')")
   }
 }
-$info.Arguments = (@($argList | ForEach-Object { ConvertTo-Argument $_ }) -join ' ')
+$info.Arguments = (@($argList | ForEach-Object { if ($isBatch) { ConvertTo-BatchArgument $_ } else { ConvertTo-Argument $_ } }) -join ' ')
 $info.UseShellExecute = $false
+# Outside a session, COMMAND writes straight to the streams of the wrapper. Windows
+# PowerShell 5.1 drops quotes inside the arguments of & COMMAND, so it starts the same way.
+if (-not $inSession) {
+  $proc = [Diagnostics.Process]::Start($info)
+  $proc.WaitForExit()
+  exit $proc.ExitCode
+}
 $info.RedirectStandardOutput = $true
 $info.RedirectStandardError = $true
 $info.StandardOutputEncoding = $utf8
@@ -312,7 +332,7 @@ try {
   $pending = @{ out = $readers.out.ReadLineAsync(); err = $readers.err.ReadLineAsync() }
   while ($pending.Count -gt 0) {
     $keys = @($pending.Keys)
-    $index = [Threading.Tasks.Task]::WaitAny([Threading.Tasks.Task[]]@($keys | ForEach-Object { $pending[$_] }), 1000)
+    $index = [Threading.Tasks.Task]::WaitAny([Threading.Tasks.Task[]]@($keys | ForEach-Object { $pending[$_] }), $writeMs)
     if ($index -ge 0) {
       $key = $keys[$index]
       $line = $pending[$key].Result
@@ -323,13 +343,14 @@ try {
           Open-File
           $id = if ($tag[0]) { Use-Sub $tag[0] } else { Use-Root }
           Set-Value $id $tag[1]
-          Write-RunFile
+          $script:dirty = $true
         } else {
           if ($key -eq 'out') { [Console]::Out.WriteLine($line) } else { [Console]::Error.WriteLine($line) }
           if ($line) { $last = $line }
         }
       }
     }
+    if ($script:dirty -and $clock.ElapsedMilliseconds - $script:lastWriteMs -ge $writeMs) { Write-RunFile }
     if ($script:file -and (Get-Seconds) - $script:lastWrite -ge 5) { Write-RunFile }
   }
   $proc.WaitForExit()

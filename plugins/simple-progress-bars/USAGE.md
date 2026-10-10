@@ -15,6 +15,8 @@ The wrapper runs COMMAND. COMMAND prints tag lines, and the wrapper turns them i
 
 The first word that is not an option is COMMAND. Every later word goes to COMMAND, also words that start with `-`.
 
+On Windows, prefer the PowerShell wrapper for a `.cmd` or `.bat` COMMAND, such as `npm.cmd`. It quotes each argument for cmd.exe, so `&`, `|`, `^`, `=` and `%PATH%` reach the script as text. A `"` reaches it as `""`. Git Bash, and so the bash wrapper, splits such arguments at these characters.
+
 ## Tags
 A tag starts the line. A tag in the middle of a line is normal output. A command that prints no tags shows no bar. For one step that you cannot measure, or a script that you must not edit, print a status from your own command around it:
 ```bash
@@ -102,7 +104,7 @@ claude-progress -n render ssh -q HOST 'tail -n +1 -F render.log'
 ## How it works
 The plugin has two parts: the wrapper, and a set of hooks inside Claude Code.
 1. The wrapper runs COMMAND, and reads its standard output and standard error. It reads the session ID from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in every shell call.
-2. The wrapper holds the state of each task in memory. After each tag, it rewrites one run file, `${CLAUDE_CONFIG_DIR:-~/.claude}/progress/<session id>/<pid>-<start>`. It also rewrites the file every 5 s while COMMAND is quiet.
+2. The wrapper holds the state of each task in memory. After a tag, it rewrites one run file, `${CLAUDE_CONFIG_DIR:-~/.claude}/progress/<session id>/<pid>-<start>`, at most every 0.2 s. It also rewrites the file every 5 s while COMMAND is quiet.
 3. The plugin reads the session's folder 4 times a second, and draws a row for each task. A run file that has not changed for 15 s belongs to a wrapper that is gone, so its running tasks show `stopped`.
 
 - Tags cost no process, so print them at any rate.
