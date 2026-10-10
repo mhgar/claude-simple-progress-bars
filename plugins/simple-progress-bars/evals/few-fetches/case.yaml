@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: few-fetches
-description: A few slow steps in one command, about 12 seconds in all, get progress reports without being asked.
+description: A few slow steps in one command, about 12 seconds in all, run through the wrapper without being asked.
 tags: [bash, use]
 context:
   scaffold_script: setup.sh
@@ -11,7 +11,11 @@ execution:
   prompt: |
     Get the four papers listed in papers.txt with ./fetch.sh URL, then tell me how many words each one has.
 graders:
-  - name: reports-progress
+  - name: uses-the-wrapper
     type: tool_used
     tool: Bash
     input_match: 'claude-progress'
+  - name: prints-tags
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress[\s\S]*\[progress(?::[^\]]*)?\] '

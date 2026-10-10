@@ -1,0 +1,21 @@
+schema_version: "1.1"
+name: detached-remote-job
+description: A detached job on a remote server is followed through its log, inside the wrapper, from the start of the log.
+tags: [bash, use]
+context:
+  scaffold_script: setup.sh
+execution:
+  max_turns: 15
+  timeout_seconds: 300
+  allowed_tools: [Bash, Read, Glob]
+  prompt: |
+    A render runs detached on our render server, and writes its log to render.log in its home folder. The log has [progress] tags. Start showing its progress bar now, and leave it running in the background until the render finishes. Do not wait for the render. The server is only reachable through ./ssh in this folder, which works like ssh: ./ssh render-box 'COMMAND'.
+graders:
+  - name: follows-in-the-wrapper
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress[^\n]*ssh[\s\S]*tail'
+  - name: replays-the-log
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress[\s\S]*tail[^\n]*(-n\s*\+1|--lines[= ]\+1|-c\s*\+1)'

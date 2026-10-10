@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: test-batch
-description: A batch of eight tests, about 8 seconds in all, gets a count without being asked.
+description: A batch of eight tests, about 8 seconds in all, runs through the wrapper with a count, without being asked.
 tags: [bash, use]
 context:
   scaffold_script: setup.sh
@@ -11,11 +11,11 @@ execution:
   prompt: |
     Run each test script in tests/ and tell me which ones fail.
 graders:
-  - name: reports-progress
+  - name: uses-the-wrapper
     type: tool_used
     tool: Bash
     input_match: 'claude-progress'
   - name: reports-a-count
     type: tool_used
     tool: Bash
-    input_match: 'claude-progress[\s\S]*([\s"''\\](\$\{?\w+\}?|\$\([^)]*\)|\d[\w.]*)/(\$\{?\w+\}?|\d[\w.]*)|\d%| -t )'
+    input_match: 'claude-progress[\s\S]*\[progress(?::[^\]]*)?\] (?:(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)/(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)|\S*%|total )'

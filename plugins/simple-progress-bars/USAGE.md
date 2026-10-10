@@ -1,88 +1,103 @@
 # claude-progress reference
 
-`claude-progress [-n NAME] [-t TOTAL] VALUE [DETAIL...]`
+`claude-progress [-n NAME] [--] COMMAND [ARGS...]`
 
-Options first. The first other word is VALUE. Every later word is DETAIL, also words that start with `-`.
-- Bash tool: `bash "<plugin>/scripts/claude-progress.sh" ...`
-- PowerShell tool: `& "<plugin>/scripts/claude-progress.ps1" ...`
-- Script files: the shims at the end.
+The wrapper runs COMMAND. COMMAND prints tag lines, and the wrapper turns them into bars. Tag lines never reach the output. Every other line does, on its own stream.
+- Bash tool: `bash "<plugin>/scripts/claude-progress.sh" -n NAME COMMAND`
+- PowerShell tool: `& "<plugin>/scripts/claude-progress.ps1" -n NAME COMMAND`
 
 ## Options
-- `-n`, `--name NAME`: the task. One bar per name. Default `task`. `/`, `\`, CR, and LF become `-`. Leading dots go. 80 characters at most.
-- `-t`, `--total TOTAL`: set the total. Alone, it starts the task at 0.
+- `-n`, `--name NAME`: the name of the root task. Default: the file name of COMMAND without its extension, so `./render.sh` gives `render`. Set it for `bash -c` and `ssh`.
+- `--`: the end of the options.
 - `--dir`: print the progress directory.
 - `-h`, `--help`, or no arguments: print the help.
 
-## VALUE
+The first word that is not an option is COMMAND. Every later word goes to COMMAND, also words that start with `-`.
+
+## Tags
+A tag starts the line. A tag in the middle of a line is normal output. A command that prints no tags shows no bar. For one step that you cannot measure, or a script that you must not edit, print a status from your own command around it:
+```bash
+claude-progress -n build bash -c 'echo "[progress] Building the viewer"; ./build.sh'
+```
+
+| Tag | Updates |
+| --- | --- |
+| `[progress] VALUE [DETAIL]` | the root task of the run |
+| `[progress:SUB] VALUE [DETAIL]` | the subtask SUB of the root task. SUB ends at the first `]`. |
+
 | VALUE | Effect |
 | --- | --- |
-| `N/M` | N of M done. Replaces the task file. |
+| `N/M` | N of M done. |
 | `1.5G/4G` | Bytes. Units K, M, G, T, P, with optional `i` and `B`, are powers of 1024. The bar shows a rate. |
-| `N%` | Percent. Replaces the task file. |
-| `+N`, `+512M` | Add N to the count. Appends, so parallel workers need no lock. |
+| `N%` | Percent. |
+| `+N`, `+512M` | Add N to the count. Parallel workers can each print `+1`. |
+| `total N` | Set the total. |
 | text | Status. Keeps the count and the total. |
 | `done [MSG]` | End: done. Fills the count to the total. |
 | `fail [MSG]` | End: failed. |
-| `clear` | Remove the bar now. |
+| `clear` | Remove the task now. On the root, also its subtasks. |
 
-Numbers: up to 15 digits, optional `,` groups, up to 6 decimals. `N/0` and a percent above 100 read as text. A report after `done` or `fail` starts a new run.
+Numbers: up to 15 digits, optional `,` groups, up to 6 decimals. `N/0` and a percent above 100 read as text. `stopped` reads as text: only the wrapper stops a task.
+
+## Root tasks and subtasks
+- Each run has one root task. A `[progress:SUB]` tag with no running root starts a root with no count.
+- There is one layer of subtasks. A subtask shows on an indented row under its root.
+- An end of the root ends each running subtask with the same state.
+- An ended task is final. A later tag with the same name starts a new task with a new bar.
+
+## Ends
+- End each task with `done` or `fail`. Give true counts, such as `done 38 copied, 2 failed`. Use `fail` only when the whole task fails.
+- When COMMAND exits, each running task ends: `done` after exit status 0, else `fail exit N: LAST LINE`. A task that a tag ended keeps that end.
+- On `INT`, `TERM`, `HUP`, or `QUIT`, the wrapper sends the signal to COMMAND, waits for it, and ends the running tasks as `stopped`.
+- The wrapper exits with the exit status of COMMAND, or 127 when COMMAND does not exist.
+
+## Flush after each tag
+In a pipe, many languages hold output in a buffer, and tags then arrive late. Flush after each tag:
+
+| Language | Tag line |
+| --- | --- |
+| Bash | `echo "[progress] $i/$n"` (no buffer) |
+| Python | `print(f"[progress] {i}/{n}", flush=True)` |
+| Node | `console.log(\`[progress] ${i}/${n}\`)` (no buffer) |
+| PowerShell | `Write-Output "[progress] $i/$n"` (no buffer) |
+| C | `printf("[progress] %d/%d\n", i, n); fflush(stdout);` |
+| Rust | `println!("[progress] {i}/{n}"); std::io::stdout().flush()?;` |
+| Go | `fmt.Printf("[progress] %d/%d\n", i, n)` (no buffer) |
+| Ruby | `$stdout.sync = true` once, then `puts "[progress] #{i}/#{n}"` |
+
+The wrapper sets `PYTHONUNBUFFERED=1` for COMMAND, so local Python works without a flush. The variable does not cross SSH.
 
 ## The bar
-- Status: `estimating…` until 3 counted updates or 2 s, then `~m:ss left`. `finishing…` at the total. `no update m:ss` (yellow) after 30 s with no report.
-- At the total, a bar stays running until `done`, `fail`, or the end of its shell call.
-- `done`: green, gone after 2 s. `fail`: red, stays 30 s.
-- A bar started in a foreground Bash or PowerShell call ends with that call: `done` at its total, else `stopped` (red). A later report resumes it. A bar from a background job keeps running, and goes 10 min after its last report.
+- Status: `estimating…` until 3 counted updates or 2 s, then `~m:ss left`. `finishing…` at the total. `no update m:ss` (yellow) after 30 s with no tag. A subtask tag counts for its root.
+- `done`: green, gone after 5 s. `fail` and `stopped`: red, gone after 10 s. These times do not depend on the wrapper or COMMAND.
+- A running bar stays while its wrapper runs, however long a step takes. If the wrapper stops without a chance to write, as after `KILL`, the bar shows `stopped` after 15 s.
 
-## Behavior
-- Exit status is always 0. Nothing goes to stdout. A warning goes to stderr and starts with `claude-progress: `.
-- Outside Claude Code (no `CLAUDE_CODE_SESSION_ID`), a call writes nothing.
-- Task file: `${CLAUDE_CONFIG_DIR:-~/.claude}/progress/<session id>/<name>`. Folders of ended sessions go after 1 hour.
-- Each call starts a process. Report at most once a second: in a fast loop, every Nth item.
+## Background jobs
+The wrapper must run as long as the job. Put it outside `nohup`, `&`, and `setsid`:
+- Works: the Bash tool with `run_in_background`, or `nohup claude-progress -n render ./render.sh > render.log 2>&1 &`.
+- Fails: `claude-progress -n render nohup ./render.sh &`. The wrapper ends at once, and later tags go nowhere.
 
-## Rules
-- Give true counts in `done`, such as `done "38 copied, 2 failed"`. Skip a failed item with a message, or count it. Use `fail` only when the whole run fails.
-- Progress code prints nothing. Send errors of helper code, such as a line count of a file that does not exist yet, to `/dev/null`.
+## Remote jobs
+Attached: the job runs inside the SSH connection. If the connection drops, the server usually stops the job.
+```bash
+claude-progress -n render ssh -q -o ServerAliveInterval=30 -o ServerAliveCountMax=3 HOST 'python -u render.py'
+```
+`-q` hides the server banner. The keep-alive options end SSH after about 90 s with no answer.
+
+Detached: for long jobs. The job runs on the server with no connection, and writes a log there. Start it, then follow the log in the background:
+```bash
+ssh -q HOST 'nohup python -u render.py > render.log 2>&1 &'
+claude-progress -n render ssh -q HOST 'tail -n +1 -F render.log'
+```
+`-n +1` replays the log from the start, so a new follower shows the full state. The bar ends at the job's `done` or `fail`. `tail -F` does not exit, so stop the follower after the end. If the follower connection drops, start it again.
 
 ## When a bar is wrong
-- No bar: the call ran outside Claude Code, or the name has a typo. Check with `--dir` and list `<dir>/$CLAUDE_CODE_SESSION_ID`.
-- `stopped`: the shell call ended before the total and without `done`. Report `done`, or run the job in the background.
-- `no update`: no report for 30 s. Report more often, or report a text status.
-- Two bars: two different names.
+- No bar: the command printed no tag, the run is outside Claude Code (no `CLAUDE_CODE_SESSION_ID`), the tag is not at the start of a line, or the output sits in a buffer. Check with `--dir` and list `<dir>/$CLAUDE_CODE_SESSION_ID`.
+- Tags show in the output: the wrapper is not around the command, or the run is outside Claude Code.
+- `stopped` while the job runs: the wrapper was killed, or the job is outside the wrapper.
+- `no update`: no tag for 30 s. Print tags more often, or a text status.
 
-## Script shims
-Each shim runs the newest installed copy of the plugin, or does nothing.
-
-Bash:
-```bash
-claude-progress() { local c; c=$(ls -dt "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/simple-progress-bars/*/scripts/claude-progress.sh 2>/dev/null | head -n 1); [ -n "$c" ] && bash "$c" "$@"; return 0; }
-```
-
-PowerShell:
-```powershell
-function claude-progress { $d = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }; $c = Get-ChildItem (Join-Path $d 'plugins/cache/*/simple-progress-bars/*/scripts/claude-progress.ps1') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1; if ($c) { & $c.FullName @args } }
-```
-
-Python, then `claude_progress("-n", "x", f"{i}/{n}")`:
-```python
-import glob, os, sys
-_b, sys.dont_write_bytecode = sys.dont_write_bytecode, True  # no __pycache__ in the plugin
-try:
-    sys.path.insert(0, max(glob.glob(os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "plugins/cache/*/simple-progress-bars/*/scripts")), key=os.path.getmtime))
-    from claude_progress import claude_progress
-except Exception:
-    def claude_progress(*args): pass
-finally:
-    sys.dont_write_bytecode = _b
-```
-
-Node, then `claudeProgress('-n', 'x', `${i}/${n}`)`. In an ES module, put `const require = (await import('node:module')).createRequire(import.meta.url)` first.
-```js
-let claudeProgress = () => {}
-try {
-  const fs = require('fs'), c = (process.env.CLAUDE_CONFIG_DIR || require('os').homedir() + '/.claude') + '/plugins/cache/'
-  const f = fs.readdirSync(c).flatMap(m => { try { return fs.readdirSync(`${c}${m}/simple-progress-bars`).map(v => `${c}${m}/simple-progress-bars/${v}/scripts/claude-progress.js`) } catch { return [] } })
-  ;({ claudeProgress } = require(f.filter(fs.existsSync).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]))
-} catch {}
-```
-
-Other languages: run the bash command from the newest `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/*/simple-progress-bars/*/scripts/`, and ignore failures. On Windows, use the `bash` on the PATH, not WSL.
+## Behavior
+- Run file: `${CLAUDE_CONFIG_DIR:-~/.claude}/progress/<session id>/<pid>-<start>`. The wrapper rewrites it after each tag, and at least every 5 s. Folders of ended sessions go after 1 hour.
+- Tags cost no process, so print them at any rate.
+- Outside Claude Code, the wrapper runs COMMAND and passes every line through, also tags.

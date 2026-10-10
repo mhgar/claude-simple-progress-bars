@@ -1,56 +1,4 @@
-# Progress Command Specification
-
-## Purpose
-The `claude-progress` wrapper runs a command, and turns the `[progress]` tag lines of its output into a run file that the plugin reads. A command in any language, on any machine that its output comes from, can show progress by printing a line. The wrapper is a bash script that works on Linux, macOS, and Windows with Git Bash, and it needs no other runtime. Its twin `claude-progress.ps1` does the same in PowerShell.
-
-## Requirements
-
-### Requirement: Grammar
-Options (`-n NAME` and its long form `--name NAME`) MUST come first. `--` MUST end the options. The first word that is not an option MUST be COMMAND, and every later word MUST be an argument of COMMAND, also words that start with `-`. With no arguments, or `-h` or `--help` first, the command MUST print its reference. With `--dir` first, it MUST print the progress directory.
-
-#### Scenario: Option words in the arguments
-- **WHEN** a script runs `claude-progress -n copy cp -n -p a b`
-- **THEN** the wrapper runs `cp -n -p a b`, with the root name `copy`
-
-#### Scenario: Option words in the detail
-- **WHEN** COMMAND prints `[progress] 1/4 cp -p -- file.txt`
-- **THEN** the detail of the root task is `cp -p -- file.txt`
-
-### Requirement: Never breaks a script
-The wrapper MUST NOT change the output or the exit status of COMMAND, apart from the removal of tag lines and the exit statuses in "Signals". A usage error or a failed write MUST print one warning that starts with `claude-progress: ` to standard error, and the wrapper MUST still run COMMAND. With no session ID, or a session ID with a character other than `A`-`Z`, `a`-`z`, `0`-`9`, `_`, and `-`, it MUST write no file, and MUST write every line of COMMAND to its stream, also tag lines.
-
-#### Scenario: A session ID with a path
-- **WHEN** `CLAUDE_CODE_SESSION_ID` is `../escape`, and COMMAND prints `[progress] 1/2`
-- **THEN** the wrapper writes no file, and the standard output holds `[progress] 1/2`
-
-#### Scenario: Outside Claude Code
-- **WHEN** no session ID is set, and a person runs `claude-progress ./job.sh` in a terminal
-- **THEN** the person sees every line of `job.sh`, also its tag lines
-
-### Requirement: Session owner
-When a call creates a session directory and `CLAUDE_PID` is set, it MUST write `.owner` there: a JSON object with `pid` and `procStart`, the start time of that process, as Claude Code keeps them in `~/.claude/sessions`. The owner MUST count as alive while the process runs and its start time is the same. Windows MUST check the pid with `tasklist`.
-
-#### Scenario: A reused pid
-- **WHEN** the pid in `.owner` runs again, but with another start time
-- **THEN** the owner counts as dead
-
-### Requirement: Old sessions
-When a call creates a new session directory, it MUST check the other session directories. A directory with a live owner MUST stay. One with a dead owner MUST go 1 hour after its newest write, and one with no owner record 7 days after it. The newest write MUST be the newest time of any entry in the directory.
-
-#### Scenario: A long task
-- **WHEN** a task of a live session has written nothing for 2 days
-- **THEN** its session directory stays
-
-#### Scenario: An append
-- **WHEN** a dead owner's directory is 2 days old, but a file in it got an append 10 minutes ago
-- **THEN** the directory stays
-
-### Requirement: Twins
-`scripts/claude-progress.ps1` MUST take the same arguments as the bash wrapper, `scripts/claude-progress.sh`, and MUST write the same run file content for the same output of COMMAND: UTF-8 with no byte order mark, and LF line ends. It MUST follow the same rules for the session ID, names, tags, ends, the heartbeat, owner records, old sessions, and exit status. Both wrappers MUST live in `scripts/`. The plugin MUST NOT have a `bin/` folder, and MUST NOT put any folder on the `PATH`. The plugin MUST NOT set environment variables of the session or change configuration.
-
-#### Scenario: The same calls
-- **WHEN** the same COMMAND output runs through the bash wrapper and through the PowerShell wrapper, in separate config directories
-- **THEN** the run files hold the same content
+## ADDED Requirements
 
 ### Requirement: Run a command
 The wrapper MUST run COMMAND with its arguments, and give it the standard input of the wrapper. It MUST read the standard output and the standard error of COMMAND. It MUST write each line that is not a tag line to the stream that the line came from, and keep the order of the lines inside one stream. It MUST NOT write tag lines to either stream. When COMMAND exits, the wrapper MUST exit with the exit status of COMMAND. When COMMAND cannot start, the wrapper MUST exit with status 127.
@@ -159,3 +107,44 @@ The wrapper MUST set `PYTHONUNBUFFERED=1` in the environment of COMMAND. It MUST
 #### Scenario: A Python script
 - **WHEN** a script runs `claude-progress python3 job.py`
 - **THEN** `job.py` sees `PYTHONUNBUFFERED=1`
+
+## MODIFIED Requirements
+
+### Requirement: Grammar
+Options (`-n NAME` and its long form `--name NAME`) MUST come first. `--` MUST end the options. The first word that is not an option MUST be COMMAND, and every later word MUST be an argument of COMMAND, also words that start with `-`. With no arguments, or `-h` or `--help` first, the command MUST print its reference. With `--dir` first, it MUST print the progress directory.
+
+#### Scenario: Option words in the arguments
+- **WHEN** a script runs `claude-progress -n copy cp -n -p a b`
+- **THEN** the wrapper runs `cp -n -p a b`, with the root name `copy`
+
+#### Scenario: Option words in the detail
+- **WHEN** COMMAND prints `[progress] 1/4 cp -p -- file.txt`
+- **THEN** the detail of the root task is `cp -p -- file.txt`
+
+### Requirement: Never breaks a script
+The wrapper MUST NOT change the output or the exit status of COMMAND, apart from the removal of tag lines and the exit statuses in "Signals". A usage error or a failed write MUST print one warning that starts with `claude-progress: ` to standard error, and the wrapper MUST still run COMMAND. With no session ID, or a session ID with a character other than `A`-`Z`, `a`-`z`, `0`-`9`, `_`, and `-`, it MUST write no file, and MUST write every line of COMMAND to its stream, also tag lines.
+
+#### Scenario: A session ID with a path
+- **WHEN** `CLAUDE_CODE_SESSION_ID` is `../escape`, and COMMAND prints `[progress] 1/2`
+- **THEN** the wrapper writes no file, and the standard output holds `[progress] 1/2`
+
+#### Scenario: Outside Claude Code
+- **WHEN** no session ID is set, and a person runs `claude-progress ./job.sh` in a terminal
+- **THEN** the person sees every line of `job.sh`, also its tag lines
+
+### Requirement: Twins
+`scripts/claude-progress.ps1` MUST take the same arguments as the bash wrapper, `scripts/claude-progress.sh`, and MUST write the same run file content for the same output of COMMAND: UTF-8 with no byte order mark, and LF line ends. It MUST follow the same rules for the session ID, names, tags, ends, the heartbeat, owner records, old sessions, and exit status. Both wrappers MUST live in `scripts/`. The plugin MUST NOT have a `bin/` folder, and MUST NOT put any folder on the `PATH`. The plugin MUST NOT set environment variables of the session or change configuration.
+
+#### Scenario: The same calls
+- **WHEN** the same COMMAND output runs through the bash wrapper and through the PowerShell wrapper, in separate config directories
+- **THEN** the run files hold the same content
+
+## REMOVED Requirements
+
+### Requirement: Task file
+**Reason**: One run file per wrapper run replaces one file per task name.
+**Migration**: None for scripts. "Run file" holds the path, the session ID, and the directory mode rules.
+
+### Requirement: Lines
+**Reason**: Scripts no longer call the command for each report. The wrapper rewrites the run file from memory, so the append and replace rules go.
+**Migration**: Print tag lines inside `claude-progress COMMAND`. `-t TOTAL` becomes the tag `[progress] total TOTAL`.

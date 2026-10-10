@@ -1,2 +1,0 @@
-# Makes the calls do nothing where claude-progress is not installed.
-function claude-progress { $d = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }; $c = Get-ChildItem (Join-Path $d 'plugins/cache/*/simple-progress-bars/*/scripts/claude-progress.ps1') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1; if ($c) { & $c.FullName @args } }

@@ -7,6 +7,7 @@ const TRACK_MIN = 10
 const SEGMENT_MIN = 50 // the fewest cells one bar gets before the next bar goes to a new row
 const SEPARATOR = ' │ '
 const SWEEP_MS = 120 // one cell of the indeterminate segment's movement
+const SUB_INDENT = '    ' // subtask rows start 4 cells to the right of their root
 
 /** One run of text with one style. */
 type Piece = { text: string; color?: string; dim?: boolean; bold?: boolean }
@@ -92,7 +93,7 @@ function statusOf(bar: Bar, now: number, isStalled: boolean): string {
     case 'complete':
       return 'done'
     case 'run':
-      if (isStalled) return `no update ${duration(now - bar.updatedAt)}`
+      if (isStalled) return `no update ${duration(now - bar.activeAt)}`
       if (bar.total === null) return ''
       if (bar.done >= bar.total) return 'finishing…'
       if (bar.eta === null || bar.samples < 3 || now - bar.startedAt < 2000) return 'estimating…'
@@ -143,11 +144,11 @@ function track(bar: Bar, w: number, now: number, color: string): Piece[] {
 const DROP_ORDER = ['label', 'rate', 'count', 'elapsed', 'name'] as const
 
 /** Fits the parts into `w` cells, and drops parts in DROP_ORDER until the track fits. */
-function fit(bar: Bar, parts: Parts, w: number, now: number, color: string, isQuiet: boolean): Piece[] {
+function fit(bar: Bar, parts: Parts, w: number, now: number, color: string, isQuiet: boolean, isSub: boolean): Piece[] {
   const p = { ...parts }
   for (let i = 0; i <= DROP_ORDER.length; i++) {
     const head: Piece[] = []
-    if (p.name) head.push({ text: `${p.name} `, bold: true })
+    if (p.name) head.push(isSub ? { text: `${p.name} `, dim: true } : { text: `${p.name} `, bold: true })
     if (p.label) head.push(isQuiet || bar.state === 'complete' ? { text: `${p.label} `, dim: true } : { text: `${p.label} `, color })
     const tail = [p.count, p.pct, p.rate, p.elapsed, p.status].filter(Boolean)
     const tailText = tail.length > 0 ? ` ${tail.join('  ')}` : ''
@@ -161,39 +162,103 @@ function fit(bar: Bar, parts: Parts, w: number, now: number, color: string, isQu
   return track(bar, Math.max(1, w), now, color) // very narrow: the track alone
 }
 
-/** Lays one bar out in exactly `w` cells. */
-export function layout(bar: Bar, w: number, now: number): Piece[] {
-  const isStalled = bar.state === 'run' && now - bar.updatedAt > STALL_MS
+/** Lays one bar out in exactly `w` cells. A subtask has a dim name. */
+export function layout(bar: Bar, w: number, now: number, isSub = false): Piece[] {
+  const isStalled = bar.state === 'run' && now - bar.activeAt > STALL_MS
   const isQuiet = bar.state === 'run' && !isStalled
   const color = colorOf(bar, isStalled)
-  return fit(bar, partsOf(bar, w, now, isStalled), w, now, color, isQuiet).filter(p => p.text !== '')
+  return fit(bar, partsOf(bar, w, now, isStalled), w, now, color, isQuiet, isSub).filter(p => p.text !== '')
+}
+
+/** One row before it is drawn: its bars, whether they are subtasks, and a `+N` of hidden subtasks. */
+type RowPlan = { bars: Bar[]; isSub: boolean; moreSubs: number }
+
+/** Splits `bars` into `count` rows of balanced length. */
+function balance(bars: readonly Bar[], count: number, isSub: boolean): RowPlan[] {
+  const each = Math.ceil(bars.length / count)
+  return Array.from({ length: count }, (_, r) => ({ bars: bars.slice(r * each, (r + 1) * each), isSub, moreSubs: 0 }))
+    .filter(row => row.bars.length > 0)
+}
+
+/** Draws one row in exactly `w` cells, with `moreText` at its end. */
+function draw(row: RowPlan, w: number, now: number, moreText: string): Piece[] {
+  const sep = width(SEPARATOR)
+  const indent = row.isSub ? SUB_INDENT : ''
+  const tail = `${row.moreSubs > 0 ? `  +${row.moreSubs}` : ''}${moreText}`
+  const room = w - width(indent) - width(tail)
+  const cell = Math.floor((room - sep * (row.bars.length - 1)) / row.bars.length)
+  const out: Piece[] = indent ? [{ text: indent }] : []
+  row.bars.forEach((bar, i) => {
+    if (i > 0) out.push({ text: SEPARATOR, dim: true })
+    out.push(...layout(bar, cell, now, row.isSub))
+  })
+  if (tail) out.push({ text: tail, dim: true })
+  return out
 }
 
 /**
- * Lays the bars out in rows of `w` cells. Each bar gets at least SEGMENT_MIN
- * cells. Rows are balanced, at most `maxRows` of them, then `+N`.
+ * Lays the bars out in rows of `w` cells, at most `maxRows` of them. Each bar gets
+ * at least SEGMENT_MIN cells. Roots with no visible subtasks pack together in
+ * balanced rows. A root with visible subtasks gets a block: a row of its own, and
+ * its subtasks in indented rows under it. The rows go first to roots, and subtasks
+ * get the rows that are left. Roots that do not fit show as `+N` on the last row.
  */
 export function rows(bars: readonly Bar[], w: number, now: number, maxRows: number): Piece[][] {
   if (bars.length === 0) return []
   const sep = width(SEPARATOR)
-  const perRow = Math.max(1, Math.floor((w + sep) / (SEGMENT_MIN + sep)))
-  const shown = bars.slice(0, perRow * maxRows)
-  const more = bars.length - shown.length
-  const rowCount = Math.ceil(shown.length / perRow)
-  const each = Math.ceil(shown.length / rowCount)
-
-  const out: Piece[][] = []
-  for (let r = 0; r < rowCount; r++) {
-    const group = shown.slice(r * each, (r + 1) * each)
-    const moreText = r === rowCount - 1 && more > 0 ? `  +${more}` : ''
-    const cell = Math.floor((w - width(moreText) - sep * (group.length - 1)) / group.length)
-    const row: Piece[] = []
-    group.forEach((bar, i) => {
-      if (i > 0) row.push({ text: SEPARATOR, dim: true })
-      row.push(...layout(bar, cell, now))
-    })
-    if (moreText) row.push({ text: moreText, dim: true })
-    out.push(row)
+  const perRow = (cells: number) => Math.max(1, Math.floor((cells + sep) / (SEGMENT_MIN + sep)))
+  const keys = new Set(bars.map(b => b.key))
+  const subsOf = new Map<string, Bar[]>()
+  const roots: Bar[] = []
+  for (const b of bars) {
+    if (b.root !== null && keys.has(b.root)) subsOf.set(b.root, [...(subsOf.get(b.root) ?? []), b])
+    else roots.push(b) // A subtask whose root is gone shows as a root.
   }
-  return out
+
+  // Groups in start order: a run of roots with no subtasks, or one block.
+  type Group = { plain: Bar[] } | { root: Bar; subs: Bar[] }
+  const groups: Group[] = []
+  for (const root of roots) {
+    const subs = subsOf.get(root.key)
+    const last = groups[groups.length - 1]
+    if (subs !== undefined) groups.push({ root, subs })
+    else if (last !== undefined && 'plain' in last) last.plain.push(root)
+    else groups.push({ plain: [root] })
+  }
+
+  // Rows for the roots first.
+  let left = maxRows
+  let more = 0
+  const placed: { group: Group; rows: RowPlan[] }[] = []
+  for (const group of groups) {
+    if ('plain' in group) {
+      const fit = Math.min(group.plain.length, left * perRow(w))
+      more += group.plain.length - fit
+      if (fit === 0) continue
+      const count = Math.ceil(fit / perRow(w))
+      placed.push({ group, rows: balance(group.plain.slice(0, fit), count, false) })
+      left -= count
+    } else if (left > 0) {
+      placed.push({ group, rows: [{ bars: [group.root], isSub: false, moreSubs: 0 }] })
+      left -= 1
+    } else {
+      more += 1
+    }
+  }
+
+  // Then the rows that are left, for subtasks, block by block.
+  const subWidth = w - width(SUB_INDENT)
+  for (const p of placed) {
+    if ('plain' in p.group) continue
+    const subs = p.group.subs
+    const count = Math.min(left, Math.ceil(subs.length / perRow(subWidth)))
+    const shown = Math.min(subs.length, count * perRow(subWidth))
+    const rootRow = p.rows[0]
+    if (rootRow !== undefined) rootRow.moreSubs = subs.length - shown
+    if (count > 0) p.rows.push(...balance(subs.slice(0, shown), count, true))
+    left -= count
+  }
+
+  const plans = placed.flatMap(p => p.rows)
+  return plans.map((row, r) => draw(row, w, now, r === plans.length - 1 && more > 0 ? `  +${more}` : ''))
 }

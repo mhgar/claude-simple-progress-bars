@@ -1,0 +1,33 @@
+schema_version: "1.1"
+name: remote-job
+description: A long job on a remote server runs through the wrapper around SSH, and its own progress lines become tags.
+tags: [bash, use]
+context:
+  scaffold_script: setup.sh
+execution:
+  max_turns: 15
+  timeout_seconds: 300
+  allowed_tools: [Bash, Read, Glob]
+  prompt: |
+    Run ./render.sh on our render server and tell me when it is done. It takes about 30 seconds. The server is only reachable through ./ssh in this folder, which works like ssh: ./ssh render-box 'COMMAND'. Do not edit render.sh.
+graders:
+  - name: wraps-ssh
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress[^\n]*ssh'
+  - name: prints-tags
+    type: tool_used
+    tool: Bash
+    input_match: 'claude-progress[^\n]*ssh[\s\S]*\[progress'
+  - name: uses-it-well
+    type: llm
+    focus: trace
+    criteria: |
+      In a Bash tool command, the wrapper is `bash "<plugin>/scripts/claude-progress.sh" -n NAME COMMAND`, written out or run through a variable. The command inside it prints tag lines, such as `echo "[progress] 3/8 file.txt"`, `echo "[progress] total 12"` then `echo "[progress] +1"`, or `echo "[progress] done 8 processed, 0 failed"`. The wrapper removes tag lines from the output, so judge them from the command text, not from the command output.
+      render.sh runs on the server and prints lines such as "frame 3 of 40". It cannot be edited.
+      PASS when all of these hold:
+      1. The ./ssh command runs inside the wrapper, which has a short -n name that describes the task.
+      2. A filter in the command turns the frame lines into tags with a count, such as [progress] 3/40, for example with awk or sed, on the server or locally inside the wrapper.
+      3. Tags start their line, and other output stays.
+      FAIL if the ssh command runs outside the wrapper, or no tag with a count can come from the command.
+      Reply with only the word PASS or the word FAIL. Do not explain.

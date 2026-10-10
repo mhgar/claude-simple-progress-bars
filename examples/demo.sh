@@ -1,76 +1,87 @@
 #!/usr/bin/env bash
-# Six fake tasks that show each kind of bar, for about 75 seconds.
-# From about 42 s to 70 s, bars show running, stalled, failed, and done at the same time.
-# From your own shell, no Bash call owns the tasks. So no bar shows "stopped".
+# Fake tasks that show each kind of bar, for about 75 seconds. Each task runs
+# through the claude-progress wrapper, and prints tag lines.
 # Run it in a Claude Code session with the plugin enabled: ! examples/demo.sh
 set -u
-CLAUDE_PROGRESS=$(cd "$(dirname "$0")/.." && pwd)/plugins/simple-progress-bars/scripts/claude-progress.sh
-export CLAUDE_PROGRESS
-claude-progress() { bash "$CLAUDE_PROGRESS" "$@"; }
-export -f claude-progress
+WRAPPER=$(cd "$(dirname "$0")/.." && pwd)/plugins/simple-progress-bars/scripts/claude-progress.sh
 if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
   echo "Run this inside a Claude Code session."
   exit 1
 fi
 
+# task NAME FUNCTION: runs FUNCTION through the wrapper, with no output.
+task() { bash "$WRAPPER" -n "$1" bash -c "$(declare -f "$2"); $2" > /dev/null 2>&1; }
+
 # A count with detail text, at an uneven speed.
 convert() {
   local n=90 i
   for ((i = 1; i <= n; i++)); do
-    claude-progress -n convert-videos "$i/$n" "$(printf 'clip_%03d.mkv' "$i")"
+    printf '[progress] %d/%d clip_%03d.mkv\n' "$i" "$n" "$i"
     sleep "0.$((RANDOM % 4 + 7))"
   done
-  claude-progress -n convert-videos "done"
+  echo "[progress] done"
 }
 
 # Sizes, with a rate.
 download() {
   local mb
   for ((mb = 0; mb <= 2048; mb += 32)); do
-    claude-progress -n download-ubuntu-iso "${mb}M/2G"
+    echo "[progress] ${mb}M/2G"
     sleep 0.95
   done
-  claude-progress -n download-ubuntu-iso "done"
+  echo "[progress] done"
 }
 
-# One total, then +1 from six parallel workers.
-thumbnails() {
-  claude-progress -n thumbnails -t 200
-  # shellcheck disable=SC2016  # the worker shell expands these
-  seq 200 | xargs -P6 -I{} bash -c 'sleep "0.$((RANDOM % 9 + 10))"; claude-progress -n thumbnails +1'
-  claude-progress -n thumbnails "done"
+# A root task with subtasks: frames, then an upload of each batch.
+render() {
+  local batch frame
+  echo "[progress] 0/3 batches"
+  for ((batch = 1; batch <= 3; batch++)); do
+    for ((frame = 1; frame <= 24; frame++)); do
+      echo "[progress:frames] $frame/24 batch $batch"
+      sleep 0.15
+    done
+    echo "[progress:frames] done"
+    echo "[progress:upload] 0/3"
+    for ((frame = 1; frame <= 3; frame++)); do echo "[progress:upload] $frame/3"; sleep 0.8; done
+    echo "[progress:upload] done"
+    echo "[progress] $batch/3 batches"
+  done
+  echo "[progress] done 72 frames"
 }
 
 # Text first, with no total, then a count.
 scan() {
   local i
-  claude-progress -n scan-library Scanning library
+  echo "[progress] Scanning library"
   sleep 12
   for ((i = 1; i <= 300; i++)); do
-    if ((i % 10 == 0)); then claude-progress -n scan-library "$i/300"; fi
+    echo "[progress] $i/300"
     sleep 0.14
   done
-  claude-progress -n scan-library "done"
+  echo "[progress] done"
 }
 
-# A script that stops at 40 of 100 with no report: the bar shows "no update" after 30 s.
+# A script that stops reporting at 40 of 100: the bar shows "no update" after 30 s.
 stalled() {
   local i
   for ((i = 1; i <= 40; i++)); do
-    claude-progress -n stalled-script "$i/100"
+    echo "[progress] $i/100"
     sleep 0.3
   done
+  sleep 60
 }
 
 # A task that fails with a message.
 upload() {
   local i
   for ((i = 1; i <= 25; i++)); do
-    claude-progress -n upload-to-nas "$i/60" "photo_$i.jpg"
+    echo "[progress] $i/60 photo_$i.jpg"
     sleep 1.6
   done
-  claude-progress -n upload-to-nas fail "server returned 503"
+  echo "[progress] fail server returned 503"
 }
 
-convert & download & thumbnails & scan & stalled & upload &
+task convert-videos convert & task download-ubuntu-iso download & task render-shots render &
+task scan-library scan & task stalled-script stalled & task upload-to-nas upload &
 wait

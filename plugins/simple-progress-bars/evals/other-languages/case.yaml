@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: other-languages
-description: Python and PowerShell scripts for a long job get progress reports that cannot break them.
+description: Python and PowerShell scripts for a long job print progress tags, and flush them.
 tags: [write, use]
 execution:
   max_turns: 12
@@ -13,41 +13,48 @@ graders:
     type: tool_used
     tool: Read
     input_match: 'USAGE\.md'
-  - name: python-loads-the-twin
-    type: regex
-    target: { source: file, path: resize.py }
-    pattern: 'simple-progress-bars'
   - name: python-reports-a-count
     type: regex
     target: { source: file, path: resize.py }
-    pattern: 'claude_progress\([^)]*/'
-  - name: powershell-uses-the-twin
+    pattern: '\[progress(?::[^\]]*)?\] (?:(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)/(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)|\S*%|total )'
+  - name: python-flushes
+    type: regex
+    target: { source: file, path: resize.py }
+    pattern: 'flush=True|\.flush\(\)|line_buffering'
+  - name: powershell-reports-a-count
     type: regex
     target: { source: file, path: resize.ps1 }
-    pattern: 'claude-progress\.ps1'
+    pattern: '\[progress(?::[^\]]*)?\] (?:(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)/(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)|\S*%|total )'
+  - name: no-shim
+    type: regex
+    target: { source: file, path: resize.py }
+    pattern: 'plugins/cache'
+    match: not_contains
   - name: python-uses-it-well
     type: llm
     focus: { source: file, path: resize.py }
     criteria: |
+      A script shows progress by printing tag lines, such as `echo "[progress] 3/8 file.txt"`, `print(f"[progress] {i}/{n}", flush=True)`, `[progress] total 500` then `[progress] +1`, or `[progress] done 8 copied, 0 failed`. A tag starts its line. `[progress:NAME] VALUE` is a subtask.
       PASS when all of these hold:
-      1. Every claude-progress call gives -n a short name that describes the task (any name but the default "task").
-      2. During the work, progress is reported as a count against a total (i/n, sizes, or -t then +1) or as a percent.
-      3. At the end, the code reports done when the work succeeded, or fail with a message when the run as a whole failed.
-      4. A failed item is reported with fail, skipped with a message on stdout or stderr while the run goes on, or counted, with the true count of failed items in the done or fail message at the end. This condition is about progress reports only, not about how the script handles its other errors.
-      5. The claude-progress calls do not change the normal output of the script or command.
-      Each of these is fine, and is never a reason to FAIL: a report for every item, for every Nth item, or at most once a second by a timer; a 0/n report at the start, or none; a last count that is not n/n; done right away when there is nothing to do; done at the end, with or without a summary, after items failed and were skipped with a message; one fail at the end that sums up failed items; a loop that runs beside a script and reports from its output, such as a count of output lines.
+      1. The script prints tag lines at the start of a line.
+      2. During the work, progress shows as a count against a total (i/n, sizes, or total N then +1) or as a percent.
+      3. At the end, the script prints a done tag when the work succeeded, or a fail tag with a message when the run as a whole failed.
+      4. A failed item is reported with fail, skipped with a message while the run goes on, or counted, with the true count of failed items in the done or fail message at the end. This condition is about progress only, not about how the script handles its other errors.
+      5. Where the language holds output in a buffer, the script flushes after each tag (for example flush=True in Python). Bash echo and printf need no flush.
+      Each of these is fine, and is never a reason to FAIL: a tag for every item, for every Nth item, or by a timer; a 0/n tag at the start, or none; a last count that is not n/n; done right away when there is nothing to do; done at the end, with or without a summary, after items failed and were skipped with a message; one fail at the end that sums up failed items; subtasks.
       FAIL only when one of the five conditions is clearly broken.
       Reply with only the word PASS or the word FAIL. Do not explain.
   - name: powershell-uses-it-well
     type: llm
     focus: { source: file, path: resize.ps1 }
     criteria: |
+      A script shows progress by printing tag lines, such as `echo "[progress] 3/8 file.txt"`, `print(f"[progress] {i}/{n}", flush=True)`, `[progress] total 500` then `[progress] +1`, or `[progress] done 8 copied, 0 failed`. A tag starts its line. `[progress:NAME] VALUE` is a subtask.
       PASS when all of these hold:
-      1. Every claude-progress call gives -n a short name that describes the task (any name but the default "task").
-      2. During the work, progress is reported as a count against a total (i/n, sizes, or -t then +1) or as a percent.
-      3. At the end, the code reports done when the work succeeded, or fail with a message when the run as a whole failed.
-      4. A failed item is reported with fail, skipped with a message on stdout or stderr while the run goes on, or counted, with the true count of failed items in the done or fail message at the end. This condition is about progress reports only, not about how the script handles its other errors.
-      5. The claude-progress calls do not change the normal output of the script or command.
-      Each of these is fine, and is never a reason to FAIL: a report for every item, for every Nth item, or at most once a second by a timer; a 0/n report at the start, or none; a last count that is not n/n; done right away when there is nothing to do; done at the end, with or without a summary, after items failed and were skipped with a message; one fail at the end that sums up failed items; a loop that runs beside a script and reports from its output, such as a count of output lines.
+      1. The script prints tag lines at the start of a line.
+      2. During the work, progress shows as a count against a total (i/n, sizes, or total N then +1) or as a percent.
+      3. At the end, the script prints a done tag when the work succeeded, or a fail tag with a message when the run as a whole failed.
+      4. A failed item is reported with fail, skipped with a message while the run goes on, or counted, with the true count of failed items in the done or fail message at the end. This condition is about progress only, not about how the script handles its other errors.
+      5. Where the language holds output in a buffer, the script flushes after each tag (for example flush=True in Python). Bash echo and printf need no flush.
+      Each of these is fine, and is never a reason to FAIL: a tag for every item, for every Nth item, or by a timer; a 0/n tag at the start, or none; a last count that is not n/n; done right away when there is nothing to do; done at the end, with or without a summary, after items failed and were skipped with a message; one fail at the end that sums up failed items; subtasks.
       FAIL only when one of the five conditions is clearly broken.
       Reply with only the word PASS or the word FAIL. Do not explain.

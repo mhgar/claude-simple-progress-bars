@@ -99,3 +99,44 @@ describe('rows', () => {
     expect(text(out[0] ?? [])).toContain('+10')
   })
 })
+
+describe('rows with subtasks', () => {
+  const root = run('render', [[{ done: 2, total: 10 }, 0]])
+  const sub = (name: string) => run(name, [[{ done: 1, total: 4 }, 0]], root.key)
+
+  test('a root with subtasks gets its own row, and its subtasks an indented row under it', () => {
+    const out = rows([root, sub('frames'), sub('upload')], 200, 0, 3).map(text)
+
+    expect(out.length).toBe(2)
+    expect(out[0]?.startsWith('render')).toBe(true)
+    expect(out[1]?.startsWith('    frames')).toBe(true)
+    expect(out[1]).toContain('upload')
+  })
+
+  test('draws a subtask name dim, and a root name bold', () => {
+    const [rootRow, subRow] = rows([root, sub('frames')], 200, 0, 3)
+
+    expect(rootRow?.find(p => p.text === 'render ')).toMatchObject({ bold: true })
+    expect(subRow?.find(p => p.text === 'frames ')).toMatchObject({ dim: true })
+  })
+
+  test('keeps every row of a block inside the width', () => {
+    for (const row of rows([root, sub('a'), sub('b'), sub('c')], 120, 0, 3)) expect(width(text(row))).toBeLessThanOrEqual(120)
+  })
+
+  test('gives the rows to roots first, and shows hidden subtasks as +N on the root row', () => {
+    const other = run('tests', [[{ done: 1, total: 5 }, 1]])
+
+    const out = rows([root, sub('a'), sub('b'), other], 100, 0, 2).map(text)
+
+    expect(out.length).toBe(2)
+    expect(out[0]).toContain('+2')
+    expect(out[1]?.startsWith('tests')).toBe(true)
+  })
+
+  test('a quiet root with a busy subtask is not stalled', () => {
+    const busy = { ...root, activeAt: 59_000 }
+
+    expect(text(layout(busy, 100, 60_000))).not.toContain('no update')
+  })
+})

@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: existing-script-asked
-description: When the user asks for progress in their own script, Claude adds it without asking again.
+description: When the user asks for progress in their own script, Claude adds tags without asking again.
 tags: [write, use]
 context:
   scaffold_script: setup.sh
@@ -11,37 +11,39 @@ execution:
   prompt: |
     Add a progress bar to backup.sh. Only edit the file.
 graders:
-  - name: reports-progress
-    type: regex
-    target: { source: file, path: backup.sh }
-    pattern: 'claude-progress -n'
-  - name: has-shim
-    type: regex
-    target: { source: file, path: backup.sh }
-    pattern: 'plugins/cache/\*/simple-progress-bars'
   - name: does-not-ask-again
     type: tool_used
     tool: AskUserQuestion
     min: 0
     max: 0
+  - name: prints-tags
+    type: regex
+    target: { source: file, path: backup.sh }
+    pattern: '\[progress(?::[^\]]*)?\] '
+  - name: no-shim
+    type: regex
+    target: { source: file, path: backup.sh }
+    pattern: 'plugins/cache'
+    match: not_contains
   - name: reports-a-count
     type: regex
     target: { source: file, path: backup.sh }
-    pattern: 'claude-progress -n \S+ ("[^"]*/[^"]*"|\S*/|-t |\S*%)'
+    pattern: '\[progress(?::[^\]]*)?\] (?:(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)/(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)|\S*%|total )'
   - name: ends-with-done
     type: regex
     target: { source: file, path: backup.sh }
-    pattern: 'claude-progress -n \S+ done'
+    pattern: '\[progress(?::[^\]]*)?\] (?:done|fail)\b'
   - name: uses-it-well
     type: llm
     focus: { source: file, path: backup.sh }
     criteria: |
+      A script shows progress by printing tag lines, such as `echo "[progress] 3/8 file.txt"`, `print(f"[progress] {i}/{n}", flush=True)`, `[progress] total 500` then `[progress] +1`, or `[progress] done 8 copied, 0 failed`. A tag starts its line. `[progress:NAME] VALUE` is a subtask.
       PASS when all of these hold:
-      1. Every claude-progress call gives -n a short name that describes the task (any name but the default "task").
-      2. During the work, progress is reported as a count against a total (i/n, sizes, or -t then +1) or as a percent.
-      3. At the end, the code reports done when the work succeeded, or fail with a message when the run as a whole failed.
-      4. A failed item is reported with fail, skipped with a message on stdout or stderr while the run goes on, or counted, with the true count of failed items in the done or fail message at the end. This condition is about progress reports only, not about how the script handles its other errors.
-      5. The claude-progress calls do not change the normal output of the script or command.
-      Each of these is fine, and is never a reason to FAIL: a report for every item, for every Nth item, or at most once a second by a timer; a 0/n report at the start, or none; a last count that is not n/n; done right away when there is nothing to do; done at the end, with or without a summary, after items failed and were skipped with a message; one fail at the end that sums up failed items; a loop that runs beside a script and reports from its output, such as a count of output lines.
+      1. The script prints tag lines at the start of a line.
+      2. During the work, progress shows as a count against a total (i/n, sizes, or total N then +1) or as a percent.
+      3. At the end, the script prints a done tag when the work succeeded, or a fail tag with a message when the run as a whole failed.
+      4. A failed item is reported with fail, skipped with a message while the run goes on, or counted, with the true count of failed items in the done or fail message at the end. This condition is about progress only, not about how the script handles its other errors.
+      5. Where the language holds output in a buffer, the script flushes after each tag (for example flush=True in Python). Bash echo and printf need no flush.
+      Each of these is fine, and is never a reason to FAIL: a tag for every item, for every Nth item, or by a timer; a 0/n tag at the start, or none; a last count that is not n/n; done right away when there is nothing to do; done at the end, with or without a summary, after items failed and were skipped with a message; one fail at the end that sums up failed items; subtasks.
       FAIL only when one of the five conditions is clearly broken.
       Reply with only the word PASS or the word FAIL. Do not explain.

@@ -3,17 +3,16 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Bar, Board } from '../types'
 import { rows } from './layout'
-import { parse } from './parse'
+import { parseRun } from './parse'
 import { promptSection } from './prompt'
-import { ingest, isTaskName, needsRead, settle } from './watch'
-import type { Call, TaskFile } from './watch'
+import { hide, ingest, isRunName, settle } from './watch'
+import type { Hidden, RunFile } from './watch'
 
 const board = atom({ plugin: 'simple-progress-bars', key: 'board' } as const, { bars: [], now: 0 } as Board)
 
 // 4 reads a second: the bar moves smoothly, and a read lists one small directory.
 const TICK_MS = 250
 const ID_CHECK_TICKS = 4 // once a second: /clear and /resume change the session id
-const CALL_KEEP_MS = 60_000 // An ended call matters only to the next few reads.
 const INDENT = 2 // cells: in line with the text of the prompt, after its glyph
 
 // One cell stays free at the right edge: a row as wide as the band gets cut with `…`.
@@ -25,25 +24,25 @@ type Watch = {
   base: string | null
   /** The session directories of this process, newest last. Older ones keep their background tasks. */
   dirs: string[]
-  /** The foreground Bash and PowerShell calls that run, or ended in the last minute. */
-  calls: Call[]
-  /** Expired task files, by key, with the modification time they had. A newer write shows them again. */
-  hidden: Map<string, number>
+  /** The modification time of each run file at its last complete read. */
+  read: Map<string, number>
+  /** Expired tasks, by key. */
+  hidden: Hidden
   isBusy: boolean
   ticks: number
 }
 
-/** Lists one session directory. Reads only the files that changed, and skips hidden ones. */
-async function readDir($: EngineInterface, w: Watch, dir: string, byKey: ReadonlyMap<string, Bar>): Promise<TaskFile[]> {
+/** Lists one session directory. Reads only the run files that changed since their last complete read. */
+async function readDir($: EngineInterface, w: Watch, dir: string): Promise<RunFile[]> {
   const entries = await $.fs.list(dir).catch(() => [])
-  const tasks = entries.filter(e => e.kind === 'file' && isTaskName(e.name))
-    .filter(e => w.hidden.get(`${dir}/${e.name}`) !== e.mtimeMs)
-  return Promise.all(tasks.map(async (entry): Promise<TaskFile> => {
-    const key = `${dir}/${entry.name}`
-    w.hidden.delete(key)
-    const isChanged = needsRead(byKey.get(key), entry.mtimeMs)
-    const update = isChanged ? parse(await $.fs.read(key).catch(() => '')) : null
-    return { key, name: entry.name, mtimeMs: entry.mtimeMs, update }
+  const runs = entries.filter(e => e.kind === 'file' && isRunName(e.name))
+  return Promise.all(runs.map(async (entry): Promise<RunFile> => {
+    const file = `${dir}/${entry.name}`
+    if (w.read.get(file) === entry.mtimeMs) return { file, mtimeMs: entry.mtimeMs, tasks: null }
+    const tasks = parseRun(await $.fs.read(file).catch(() => ''))
+    // A half-written file is read again at the next tick, even with the same time.
+    if (tasks !== null) w.read.set(file, entry.mtimeMs)
+    return { file, mtimeMs: entry.mtimeMs, tasks }
   }))
 }
 
@@ -58,11 +57,13 @@ async function tick($: EngineInterface, w: Watch) {
     }
 
     const [now, prev] = await Promise.all([$.clock.now(), read($, board)])
-    w.calls = w.calls.filter(c => c.end === null || now - c.end < CALL_KEEP_MS)
     const byKey = new Map(prev.bars.map(b => [b.key, b]))
-    const files = (await Promise.all(w.dirs.map(d => readDir($, w, d, byKey)))).flat()
-    const { bars, expired } = settle(ingest(byKey, files), w.calls, now)
-    for (const b of expired) w.hidden.set(b.key, b.updatedAt)
+    const files = (await Promise.all(w.dirs.map(d => readDir($, w, d)))).flat()
+    const mtimes = new Map(files.map(f => [f.file, f.mtimeMs]))
+    for (const file of w.read.keys()) if (!mtimes.has(file)) w.read.delete(file)
+    for (const key of w.hidden.keys()) if (!mtimes.has(key.slice(0, key.lastIndexOf('#')))) w.hidden.delete(key)
+    const { bars, expired } = settle(ingest(byKey, files, w.hidden), mtimes, now)
+    hide(w.hidden, expired, mtimes)
 
     if (bars.length > 0 || prev.bars.length > 0) await update($, board, () => ({ bars, now }))
   } finally {
@@ -84,23 +85,11 @@ async function start($: EngineInterface, w: Watch) {
   }
 }
 
-/** Runs one shell call. A foreground call is noted while it runs, so that its end can end its bars. */
-async function track<T>($: EngineInterface, w: Watch, isBackground: boolean | undefined, run: () => Promise<T>): Promise<T> {
-  if (isBackground) return run()
-  const call: Call = { start: await $.clock.now(), end: null }
-  w.calls.push(call)
-  try {
-    return await run()
-  } finally {
-    call.end = await $.clock.now()
-  }
-}
-
 export const register: Register = (on, options) => {
   const maxRows = typeof options.maxRows === 'number' ? Math.max(1, Math.round(options.maxRows)) : 3
   const minSeconds = typeof options.minSeconds === 'number' ? Math.max(1, options.minSeconds) : 2
   const w: Watch = {
-    base: null, dirs: [], calls: [], hidden: new Map(), isBusy: false, ticks: 0,
+    base: null, dirs: [], read: new Map(), hidden: new Map(), isBusy: false, ticks: 0,
   }
 
   on('session.start', async ($, e, next) => {
@@ -108,10 +97,6 @@ export const register: Register = (on, options) => {
     await start($, w)
     return result
   })
-
-  // The end of a foreground shell call ends the bars that only it can own.
-  on('tool.call', { tool: 'Bash' }, ($, e, next) => track($, w, e.run_in_background, () => next(e)))
-  on('tool.call', { tool: 'PowerShell' }, ($, e, next) => track($, w, e.run_in_background, () => next(e)))
 
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)

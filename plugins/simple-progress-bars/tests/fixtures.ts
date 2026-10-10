@@ -7,10 +7,11 @@ export function upd(fields: Partial<Update>): Update {
   return { state: 'run', done: 0, total: null, unit: '', detail: '', msg: '', ...fields }
 }
 
-/** Applies updates in order, each at its time in ms, and returns the bar. */
-export function run(name: string, steps: [Partial<Update>, number][]): Bar {
+/** Applies updates in order, each at its time in ms, and returns the bar of task 1 in the file `/d/<name>`. */
+export function run(name: string, steps: [Partial<Update>, number][], root: string | null = null): Bar {
   let bar: Bar | undefined
-  for (const [fields, at] of steps) bar = apply(bar, `/d/${name}`, name, upd(fields), at)
+  const place = { key: `/d/${name}#1`, file: `/d/${name}`, root, name }
+  for (const [fields, at] of steps) bar = apply(bar, place, upd(fields), at)
   if (bar === undefined) throw new Error('no steps')
   return bar
 }

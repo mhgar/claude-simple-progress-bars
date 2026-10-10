@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Tests for scripts/claude-progress.sh, on Linux, macOS, and Git Bash on Windows.
+# Where PowerShell is installed, they also compare scripts/claude-progress.ps1 with it.
 # Run: tests/cli-test.sh. The checks write only to a temporary directory.
+# shellcheck disable=SC2016 # the commands in single quotes run in their own shell
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -9,7 +11,6 @@ TMP=$(mktemp -d)
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 export CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=test-session
 BASE="$CLAUDE_CONFIG_DIR/progress"
-D="$BASE/$CLAUDE_CODE_SESSION_ID"
 case $(uname -s) in MINGW* | MSYS* | CYGWIN*) IS_WINDOWS=1 ;; *) IS_WINDOWS= ;; esac
 passed=0
 failed=0
@@ -24,89 +25,142 @@ check() {
   fi
 }
 
-lines() { tr '\n' '|' < "$D/$1" 2>/dev/null; }
 exists() { [ -e "$1" ] && echo yes || echo no; }
+yes_if() { if "$@"; then echo yes; else echo no; fi; }
+matches() { [[ $1 =~ $2 ]]; }
+# runs SESSION: the number of run files in a session directory.
+runs() { find "$BASE/$1" -type f ! -name '.*' 2>/dev/null | wc -l | tr -d ' '; }
+# runfile SESSION: the lines of the one run file of a session, joined with |.
+runfile() { local f; for f in "$BASE/$1"/*; do [ -f "$f" ] && tr '\n' '|' < "$f"; done; }
+# wrap SESSION ARGS...: runs the wrapper in a session of its own, so that each run file is easy to find.
+wrap() { local s=$1; shift; CLAUDE_CODE_SESSION_ID=$s "$P" "$@"; }
 
-# --- Reports
+# --- Run a command
 
-"$P" -n count 17/240 clip.mkv
-check "a count writes one line" "17/240 clip.mkv|" "$(lines count)"
-"$P" -n count 18/240 clip_018.mkv
-check "a new count replaces the file" "18/240 clip_018.mkv|" "$(lines count)"
-"$P" -n count Scanning disk
-check "text appends" "18/240 clip_018.mkv|Scanning disk|" "$(lines count)"
-"$P" -n count "done"
-check "done appends" "18/240 clip_018.mkv|Scanning disk|done|" "$(lines count)"
+out=$(wrap fail -n job bash -c 'echo "[progress] 1/2"; echo hello; exit 3')
+check "a failed command keeps its exit status" 3 "$?"
+check "tag lines leave the output, other lines stay" hello "$out"
 
-"$P" -n pct 42% halfway
-check "a percent replaces the file" "42% halfway|" "$(lines pct)"
+out=$(wrap missing no-such-command-xyz 2>&1)
+check "a missing command exits 127" 127 "$?"
+check "a missing command warns" "claude-progress: no-such-command-xyz: command not found" "$out"
 
-"$P" -n failed fail "disk full"
-check "fail appends with its message" "fail disk full|" "$(lines failed)"
+check "standard input reaches the command" piped "$(echo piped | wrap stdin cat)"
+check "standard error stays on standard error" "out|" "$(wrap streams sh -c 'echo out; echo bad >&2' 2>/dev/null | tr '\n' '|')"
+check "a tag on standard error counts" "task 1 - err|[1] 1/3|[1] done|end|" "$(wrap err -n err sh -c 'echo "[progress] 1/3" >&2' 2>/dev/null; runfile err)"
+check "a last line with no line end stays so" "a|b" "$(wrap partial printf 'a\nb' | tr '\n' '|')"
+check "the command gets PYTHONUNBUFFERED=1" 1 "$(wrap env sh -c 'echo "$PYTHONUNBUFFERED"')"
 
-"$P" -n workers -t 50
-seq 50 | xargs -P8 -I{} "$P" -n workers +1
-check "-t alone starts the file with the total" "total 50" "$(head -1 "$D/workers")"
-check "parallel +1 appends every line" 50 "$(grep -c '^+1$' "$D/workers")"
+# --- Grammar and the root name
 
-"$P" -n both 3/9 -t 20
-check "options after VALUE are detail text" "3/9 -t 20|" "$(lines both)"
-"$P" -n both -t 20 3/9
-check "a total with a count comes after it" "3/9|total 20|" "$(lines both)"
+check "option words after COMMAND are its arguments" "-n|-p|a|b|" "$(wrap words -n copy printf '%s|' -n -p a b)"
+wrap detail -n copy sh -c 'echo "[progress] 1/4 cp -p -- file.txt"'
+check "option words in a tag are its detail" "task 1 - copy|[1] 1/4 cp -p -- file.txt|[1] done|end|" "$(runfile detail)"
+mkdir -p "$TMP/tools" && printf '#!/bin/sh\necho "[progress] 1/2"\n' > "$TMP/tools/render.sh" && chmod +x "$TMP/tools/render.sh"
+wrap name "$TMP/tools/render.sh"
+check "the root name comes from the file name of the command" "task 1 - render" "$(runfile name | cut -d'|' -f1)"
+wrap dashes -- sh -c 'echo "[progress] 1/2"'
+check "-- ends the options" "task 1 - sh" "$(runfile dashes | cut -d'|' -f1)"
 
-"$P" -n detail-words 1/4 cp -p -- file.txt
-check "option words after VALUE are detail" "1/4 cp -p -- file.txt|" "$(lines detail-words)"
+# --- Tag lines and values
 
-"$P" -n gone 1/2
-"$P" -n gone clear
-check "clear removes the file" no "$(exists "$D/gone")"
+check "a tag in the middle of a line is output" 'echo "[progress] 3/8"' "$(wrap mid sh -c "echo 'echo \"[progress] 3/8\"'")"
+check "a tag in the middle of a line makes no run file" 0 "$(runs mid)"
+check "a tag with no value is output" "[progress]|[progress] |" "$(wrap novalue sh -c 'echo "[progress]"; echo "[progress] "' | tr '\n' '|')"
+wrap crlf -n w sh -c 'printf "[progress] 3/8\r\n"; sleep 0'
+check "a CR before the line end is no part of the tag" "[1] 3/8" "$(runfile crlf | cut -d'|' -f2)"
+wrap emptyname -n w sh -c 'echo "[progress:] 2/9"'
+check "an empty name is the root" "task 1 - w|[1] 2/9" "$(runfile emptyname | cut -d'|' -f1-2)"
+wrap stopped -n w sh -c 'echo "[progress] stopped early"'
+check "a script cannot stop a task" "[1] +0 stopped early|[1] done" "$(runfile stopped | cut -d'|' -f2-3)"
 
-"$P" 1/2
-check "the default name is task" "1/2|" "$(lines task)"
+# --- Root task and subtasks
 
-# --- Names
+wrap subonly -n render sh -c 'echo "[progress:frames] 1/240"'
+check "a subtask with no root starts a root with no count" "task 1 - render|[1] done|task 2 1 frames|[2] 1/240|[2] done|end|" "$(runfile subonly)"
+wrap again -n r sh -c 'echo "[progress] 1/9"; echo "[progress:frames] done"; echo "[progress:frames] 1/240"'
+check "a tag after an end starts a new task" "task 2 1 frames|[2] done|task 3 1 frames|[3] 1/240" "$(runfile again | cut -d'|' -f4-7)"
+wrap rootfirst -n r sh -c 'echo "[progress:upload] 3/10"; echo "[progress] done"; exit 1'
+check "an end of the root ends its subtasks the same" "task 1 - r|[1] done|task 2 1 upload|[2] 3/10|[2] done|end|" "$(runfile rootfirst)"
+wrap clear -n r sh -c 'echo "[progress] 1/2"; echo "[progress:a] 1/2"; echo "[progress] clear"'
+check "clear on the root removes it and its subtasks" "end|" "$(runfile clear)"
 
-"$P" -n 'a/b/../c' 1/2
-check "a slash becomes a dash" "1/2|" "$(lines 'a-b-..-c')"
-"$P" -n 'win\path' 1/2
-check "a backslash becomes a dash" "1/2|" "$(lines 'win-path')"
-"$P" -n .hidden 1/2
-check "a name cannot start with a dot" "1/2|" "$(lines hidden)"
-"$P" -n "$(printf 'line\nbreak')" 1/2
-check "a line break becomes a dash" "1/2|" "$(lines line-break)"
-long=$(printf 'x%.0s' $(seq 100))
-"$P" -n "$long" 1/2
-check "a name is cut to 80 characters" yes "$(exists "$D/${long:0:80}")"
+# --- Fallback ends
+
+wrap noend -n r sh -c 'echo "[progress] 2/5"; echo "disk full"; exit 1' > /dev/null
+check "a command that fails ends its tasks fail, with the last line" "[1] fail exit 1: disk full" "$(runfile noend | cut -d'|' -f3)"
+wrap endtag -n r sh -c 'echo "[progress] done"; exit 1'
+check "an end tag stays after a failed exit" "task 1 - r|[1] done|end|" "$(runfile endtag)"
+wrap ok -n r sh -c 'echo "[progress] 2/5"'
+check "a command that succeeds ends its tasks done" "[1] done" "$(runfile ok | cut -d'|' -f3)"
+
+# --- Signals and a closed output
+
+if [ -z "$IS_WINDOWS" ]; then
+  # A background job of a script starts with INT ignored, so this test sends TERM.
+  CLAUDE_CODE_SESSION_ID=sig "$P" -n sig sh -c 'echo "[progress] 1/5"; echo "[progress:sub] 1/2"; sleep 30' &
+  w=$!
+  sleep 1.5
+  kill -TERM $w
+  wait $w
+  check "TERM exits with 143" 143 "$?"
+  check "TERM ends the running tasks as stopped" "task 1 - sig|[1] 1/5|[1] stopped|task 2 1 sub|[2] 1/2|[2] stopped|end|" "$(runfile sig)"
+fi
+wrap closed -n c sh -c 'for i in 1 2 3; do echo line$i; echo "[progress] $i/3"; sleep 0.2; done' | head -1 > /dev/null
+sleep 1
+check "a closed output does not stop the command" "[1] 3/3|[1] done" "$(runfile closed | cut -d'|' -f2-3)"
+
+# --- The run file
+
+wrap format -n render sh -c 'echo "[progress] 2/10"; echo "[progress:frames] 5/40"; exit 1' > /dev/null
+check "the run file holds tasks, reports, and end" "task 1 - render|[1] 2/10|[1] fail exit 1|task 2 1 frames|[2] 5/40|[2] fail exit 1|end|" "$(runfile format)"
+name=$(basename "$(find "$BASE/format" -type f ! -name '.*')")
+check "the run file is named <pid>-<start>" yes "$(yes_if matches "$name" '^[0-9]+-[0-9]{10}$')"
+wrap adds -n r sh -c 'echo "[progress] total 1000"; i=0; while [ $i -lt 1000 ]; do echo "[progress] +1"; i=$((i + 1)); done; echo "[progress] fail stop"'
+check "whole-number adds become one sum" "task 1 - r|[1] total 1000|[1] +1000|[1] fail stop|end|" "$(runfile adds)"
+wrap sizes -n r sh -c 'echo "[progress] +1.5G"; echo "[progress] +2"; echo "[progress] +512M"; echo "[progress] fail x"'
+check "adds with units stay as lines" "[1] +2|[1] +1.5G|[1] +512M" "$(runfile sizes | cut -d'|' -f2-4)"
+wrap looks -n r sh -c 'echo "[progress] 2/10"; echo "[progress] +1 3/8 files"; echo "[progress] fail x"'
+check "a detail that looks like a count is written as +0" "[1] 2/10|[1] +1|[1] +0 3/8 files" "$(runfile looks | cut -d'|' -f2-4)"
+wrap textfirst -n r sh -c 'echo "[progress] Scanning"; echo "[progress] 3/9"; echo "[progress] fail x"'
+check "a count drops the text before it" "task 1 - r|[1] 3/9|[1] fail x|end|" "$(runfile textfirst)"
+check "the session directory is private" 700 "$(stat -c %a "$BASE/format" 2>/dev/null || stat -f %Lp "$BASE/format")"
+
+# --- The heartbeat
+
+CLAUDE_CODE_SESSION_ID=beat "$P" -n hb sh -c 'echo "[progress] 1/2"; sleep 8; echo "[progress] fail x"' &
+w=$!
+sleep 7
+f=$(find "$BASE/beat" -type f ! -name '.*')
+age=$(($(date +%s) - $(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f")))
+check "the heartbeat keeps a quiet run file fresh" yes "$(yes_if [ "$age" -le 6 ])"
+wait $w
 
 # --- Things that never break a script
 
-out=$("$P" -n x 2>&1)
-check "nothing to report exits 0" 0 "$?"
-check "nothing to report warns" "claude-progress: nothing to report. See claude-progress --help" "$out"
+out=$(CLAUDE_CODE_SESSION_ID=../escape "$P" -n x sh -c 'echo "[progress] 1/2"')
+check "a session ID with a path writes nothing" no "$(exists "$BASE/../escape")"
+check "a session ID with a path passes tags through" "[progress] 1/2" "$out"
+out=$(env -u CLAUDE_CODE_SESSION_ID "$P" sh -c 'echo "[progress] 1/2"; exit 4')
+check "outside a session the exit status stays" 4 "$?"
+check "outside a session tags reach the output" "[progress] 1/2" "$out"
 out=$("$P" -n 2>&1)
 check "-n with no value warns" "claude-progress: -n needs a value" "$out"
-
-env -u CLAUDE_CODE_SESSION_ID "$P" -n nosession 1/2
-check "no session exits 0" 0 "$?"
-check "no session writes nothing" no "$(exists "$D/nosession")"
-
-CLAUDE_CODE_SESSION_ID=../escape "$P" -n x 1/2
-check "a session ID with a path writes nothing" no "$(exists "$BASE/../escape")"
-
+out=$("$P" -n x 2>&1)
+check "no command warns" "claude-progress: no command to run. See claude-progress --help" "$out"
 if [ -z "$IS_WINDOWS" ]; then
   mkdir -p "$BASE/ro-session" && chmod 500 "$BASE/ro-session"
-  out=$(CLAUDE_CODE_SESSION_ID=ro-session "$P" -n x 1/2 2>&1)
-  check "a write that fails exits 0" 0 "$?"
-  # bash 3.2 (macOS) cannot parse a case pattern inside $( ), so this check uses [[ ]].
-  check "a write that fails warns" yes "$([[ $out == 'claude-progress: cannot write'* ]] && echo yes || echo no)"
+  out=$(wrap ro-session -n x sh -c 'echo "[progress] 1/2"; echo ran; exit 5' 2>&1)
+  check "a failed write keeps the exit status" 5 "$?"
+  check "a failed write warns once, and the command runs" yes "$(yes_if matches "$out" '^claude-progress: cannot write[^'$'\n'']*'$'\n''ran$')"
   chmod 700 "$BASE/ro-session"
-  check "the session directory is private" 700 "$(stat -c %a "$D" 2>/dev/null || stat -f %Lp "$D")"
 fi
 
-# --- Directories
+# --- Directories and help
 
 check "--dir prints the progress directory" "$BASE" "$("$P" --dir)"
 check "--dir uses ~/.claude without CLAUDE_CONFIG_DIR" "$HOME/.claude/progress" "$(env -u CLAUDE_CONFIG_DIR "$P" --dir)"
+check "no arguments prints the help" yes "$(yes_if eval '"$P" | grep -q "^Usage:"')"
 
 # --- Cleanup of old sessions
 
@@ -117,26 +171,26 @@ stamp() {
   local t=$(($(date +%s) - $1 * 86400))
   date -d "@$t" +%Y%m%d%H%M 2>/dev/null || date -r "$t" +%Y%m%d%H%M
 }
-# session NAME OWNER_JSON DAYS_AGO: makes a session directory with one task, all that old.
+# session NAME OWNER_JSON DAYS_AGO: makes a session directory with one run file, all that old.
 session() {
-  mkdir -p "$BASE/$1" && echo 1/2 > "$BASE/$1/task"
+  mkdir -p "$BASE/$1" && printf 'task 1 - x\nend\n' > "$BASE/$1/1-1700000000"
   if [ -n "$2" ]; then printf '%s' "$2" > "$BASE/$1/.owner"; fi
   # -c: create no file. The directory goes last, because a change inside it moves its time.
   touch -c -t "$(stamp "$3")" "$BASE/$1/"* "$BASE/$1/.owner" "$BASE/$1"
 }
 sweeps=0
-sweep() { sweeps=$((sweeps + 1)); CLAUDE_CODE_SESSION_ID="sweeper-$sweeps" "$P" -n x 1/2; }
+sweep() { sweeps=$((sweeps + 1)); wrap "sweeper-$sweeps" sh -c 'echo "[progress] 1/2"'; }
 
-CLAUDE_CODE_SESSION_ID=owned CLAUDE_PID=$LIVE_PID "$P" -n x 1/2
-check "a new session records its owner" yes "$(grep -q "\"pid\":$LIVE_PID" "$BASE/owned/.owner" && echo yes || echo no)"
-touch -c -t "$(stamp 30)" "$BASE/owned/x" "$BASE/owned/.owner" "$BASE/owned"
-CLAUDE_CODE_SESSION_ID=no-owner env -u CLAUDE_PID "$P" -n x 1/2
+CLAUDE_PID=$LIVE_PID wrap owned sh -c 'echo "[progress] 1/2"'
+check "a new session records its owner" yes "$(yes_if grep -q "\"pid\":$LIVE_PID" "$BASE/owned/.owner")"
+touch -c -t "$(stamp 30)" "$BASE/owned/"* "$BASE/owned/.owner" "$BASE/owned"
+env -u CLAUDE_PID CLAUDE_CODE_SESSION_ID=no-owner "$P" sh -c 'echo "[progress] 1/2"'
 check "with no CLAUDE_PID, a session records no owner" no "$(exists "$BASE/no-owner/.owner")"
 
 session dead-old '{"pid":999999,"procStart":"1"}' 1
 session dead-recent '{"pid":999999,"procStart":"1"}' 0
-session dead-appended '{"pid":999999,"procStart":"1"}' 1
-touch "$BASE/dead-appended/task" # an append changes the file, not the directory
+session dead-written '{"pid":999999,"procStart":"1"}' 1
+touch "$BASE/dead-written/1-1700000000" # a write changes the file, not the directory
 session orphan-recent '' 2
 session orphan-old '' 8
 [ -z "$IS_WINDOWS" ] && session reused "{\"pid\":$LIVE_PID,\"procStart\":\"123\"}" 1
@@ -145,138 +199,46 @@ sweep
 check "a session with a live owner stays, however old" yes "$(exists "$BASE/owned")"
 check "a dead owner's session goes after 1 hour" no "$(exists "$BASE/dead-old")"
 check "a dead owner's session stays within 1 hour" yes "$(exists "$BASE/dead-recent")"
-check "a recent append keeps a dead owner's session" yes "$(exists "$BASE/dead-appended")"
+check "a recent write keeps a dead owner's session" yes "$(exists "$BASE/dead-written")"
 check "a session with no owner stays for 7 days" yes "$(exists "$BASE/orphan-recent")"
 check "a session with no owner goes after 7 days" no "$(exists "$BASE/orphan-old")"
 [ -z "$IS_WINDOWS" ] && check "a reused pid does not keep a session" no "$(exists "$BASE/reused")"
 
 check "no temporary files are left" 0 "$(find "$BASE" -name '.*' ! -name .owner -type f | wc -l | tr -d ' ')"
 
-# --- Help, the shims, and USAGE.md
-
-check "no arguments prints the help" yes "$("$P" | grep -q '^Usage:' && echo yes || echo no)"
-# The shims find the newest install in the plugin cache. An older install that would
-# write a marker shows when a shim picks the wrong one.
-INSTALL="$CLAUDE_CONFIG_DIR/plugins/cache/test/simple-progress-bars"
-mkdir -p "$INSTALL/0.9.0/scripts" "$INSTALL/1.0.0"
-for f in claude-progress.sh claude-progress.ps1 claude_progress.py claude-progress.js; do
-  printf 'old\n' > "$INSTALL/0.9.0/scripts/$f"
-done
-printf 'echo old > "%s"\n' "$TMP/old-ran" > "$INSTALL/0.9.0/scripts/claude-progress.sh"
-touch -t 202001010000 "$INSTALL/0.9.0/scripts"/* "$INSTALL/0.9.0/scripts"
-cp -R "$ROOT/scripts" "$INSTALL/1.0.0/scripts"
-out=$(CLAUDE_CONFIG_DIR="$TMP/no-plugin" bash -c "set -eu; . \"$ROOT/shim.sh\"; claude-progress -n x 1/2; echo \$?")
-check "the shim makes the calls do nothing" 0 "$out"
-bash -c ". \"$ROOT/shim.sh\"; claude-progress -n sh-shim 3/4 two words; claude-progress -n sh-shim +1"
-check "the bash shim passes every argument" "3/4 two words|+1|" "$(lines sh-shim)"
-check "the bash shim runs the newest install" no "$(exists "$TMP/old-ran")"
-# in_usage FILE: prints yes when USAGE.md holds every line of a shim, the comment aside.
-in_usage() {
-  local line
-  while IFS= read -r line; do
-    grep -qF -- "$line" "$ROOT/USAGE.md" || { echo no; return; }
-  done < <(grep -v '^#' "$1")
-  echo yes
-}
-for shim in shim.sh shim.ps1 shim.py shim.js shim.mjs; do
-  check "USAGE.md gives $shim" yes "$(in_usage "$ROOT/$shim")"
-done
-
-# --- The other versions: PowerShell, Python, and Node, where each is installed
+# --- The PowerShell twin, where it is installed
 #
-# Each runs the same calls as the bash command, and must write the same bytes.
+# The same output through both wrappers must give the same run file and the same output.
 
 PS=$(command -v pwsh || command -v powershell.exe || command -v powershell || true)
-# The first Python that runs. On Windows, python3 can be the store stub, which runs nothing.
-PY=
-for py in python3 python; do
-  if command -v $py >/dev/null && $py -c 'import sys' 2>/dev/null; then PY=$(command -v $py); break; fi
-done
-NODE=$(command -v node || true)
 # native PATH: the form a Windows program takes. Elsewhere, the path as it is.
 native() { if [ -n "$IS_WINDOWS" ]; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
-
-# report IMPL ARGS...: one call through one version, run as a command.
-report() {
-  local impl=$1; shift
-  case $impl in
-    sh) "$P" "$@" ;;
-    ps) "$PS" -NoProfile -ExecutionPolicy Bypass -File "$(native "$ROOT/scripts/claude-progress.ps1")" "$@" ;;
-    py) "$PY" "$(native "$ROOT/scripts/claude_progress.py")" "$@" ;;
-    js) "$NODE" "$(native "$ROOT/scripts/claude-progress.js")" "$@" ;;
-  esac
-}
-impls=sh
-[ -n "$PS" ] && impls="$impls ps" || echo "skip: no PowerShell, so the PowerShell twin is not tested"
-[ -n "$PY" ] && impls="$impls py" || echo "skip: no Python, so the Python twin is not tested"
-[ -n "$NODE" ] && impls="$impls js" || echo "skip: no Node, so the Node twin is not tested"
-for impl in $impls; do
-  export CLAUDE_CODE_SESSION_ID=twin
-  export CLAUDE_CONFIG_DIR; CLAUDE_CONFIG_DIR=$(native "$TMP/twin-$impl")
-  report $impl -n count 17/240 clip.mkv
-  report $impl -n count Scanning disk
-  report $impl -n count done
-  report $impl -n pct 42% halfway
-  report $impl -n failed fail "disk full"
-  report $impl -n workers -t 5
-  report $impl -n workers +1
-  report $impl -n workers +1
-  report $impl -n both -t 20 3/9
-  report $impl -n 'a\b/c' 1/2
-  report $impl -n .hidden 1/2
-  report $impl -n gone 1/2
-  report $impl -n gone clear
-  report $impl 1/2
-  report $impl -n words 1/4 cp -p -- file.txt
-  report $impl -n ünïcode 1/2 día
-done
-export CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=test-session
-for impl in $impls; do
-  [ $impl = sh ] && continue
-  check "$impl writes the same files as bash" "" "$(diff -r --exclude=.owner "$TMP/twin-sh/progress/twin" "$TMP/twin-$impl/progress/twin" 2>&1)"
-  check "$impl leaves no temporary files" 0 "$(find "$TMP/twin-$impl" -name '.*' ! -name .owner -type f | wc -l | tr -d ' ')"
-  out=$(env -u CLAUDE_CODE_SESSION_ID bash -c "$(declare -f report native); P='$P' PS='$PS' PY='$PY' NODE='$NODE' ROOT='$ROOT' TMP='$TMP' IS_WINDOWS='$IS_WINDOWS' report $impl -n $impl-nosession 1/2"; echo "exit $?")
-  check "$impl exits 0 with no session" "exit 0" "$(printf '%s' "$out" | tr -d '\r' | tail -1)"
-  check "$impl writes nothing with no session" no "$(exists "$D/$impl-nosession")"
-done
-
-if [ -n "$PS" ]; then
-  out=$(CLAUDE_CODE_SESSION_ID=twin report ps -n x 2>&1; echo "exit $?")
-  check "the twin warns when there is nothing to report" "claude-progress: nothing to report. See claude-progress --help|exit 0" "$(printf '%s' "$out" | tr -d '\r' | tr '\n' '|')"
-  # The shim, as a .ps1 script uses it: values PowerShell reads as numbers are quoted.
-  shim=$(native "$ROOT/shim.ps1")
-  "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n ps-shim 3/4 two words; claude-progress -n ps-shim '+1'"
-  check "the PowerShell shim passes every argument" "3/4 two words|+1|" "$(lines ps-shim)"
-  out=$(CLAUDE_CONFIG_DIR="$TMP/no-plugin" "$PS" -NoProfile -ExecutionPolicy Bypass -Command ". '$shim'; claude-progress -n x 1/2; 'ok'" | tr -d '\r')
-  check "the PowerShell shim does nothing without the plugin" ok "$out"
-fi
-
-# The shims, as scripts use them: they load the twin from the newest install, and
-# do nothing without one.
-# shim_script FILE SHIM CALL: writes a script with the shim, then one call and "ok".
-shim_script() { { cat "$ROOT/$2"; printf '%s\n' "$3"; } > "$TMP/$1"; }
-if [ -n "$PY" ]; then
-  shim_script use.py shim.py 'claude_progress("-n", "py-shim", "2/5", "a.wav"); print("ok")'
-  out=$("$PY" "$(native "$TMP/use.py")" | tr -d '\r')
-  check "the Python shim reports" "ok 2/5 a.wav|" "$out $(lines py-shim)"
-  out=$(CLAUDE_CONFIG_DIR="$TMP/no-plugin" "$PY" "$(native "$TMP/use.py")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
-  check "the Python shim does nothing without the plugin" "ok exit 0" "$(printf '%s' "$out" | tr '\n' ' ')"
-  check "the Python shim writes no __pycache__ in the plugin" no "$(exists "$INSTALL/1.0.0/scripts/__pycache__")"
-  out=$("$PY" -c "$(cat "$ROOT/shim.py"); import sys; print(sys.dont_write_bytecode)" | tr -d '\r')
-  check "the Python shim leaves the script's bytecode setting as it was" False "$out"
-fi
-if [ -n "$NODE" ]; then
-  shim_script use.js shim.js 'claudeProgress("-n", "js-shim", "3/5", "b.wav"); console.log("ok")'
-  shim_script use.mjs shim.mjs 'claudeProgress("-n", "esm-shim", "4/5", "c.wav"); console.log("ok")'
-  for kind in js mjs; do
-    name=$([ $kind = js ] && echo js-shim || echo esm-shim)
-    "$NODE" "$(native "$TMP/use.$kind")" | tr -d '\r' >/dev/null
-    check "the Node .$kind shim wrote its line" yes "$([ -s "$D/$name" ] && echo yes || echo no)"
-    out=$(CLAUDE_CONFIG_DIR="$TMP/no-plugin" "$NODE" "$(native "$TMP/use.$kind")" 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
-    check "the Node .$kind shim does nothing without the plugin" "ok exit 0" "$(printf '%s' "$out" | tr '\n' ' ')"
+if [ -z "$PS" ]; then
+  echo "skip: no PowerShell, so the PowerShell twin is not tested"
+else
+  JOB='echo "[progress] total 10"; echo hello; echo "[progress] 2/10 a.exr"; echo "[progress:frames] 5/40"; echo err >&2
+echo "[progress] +1"; echo "[progress] +1 3/8 files"; echo "[progress] +1.5G"; echo "[progress] stopped early"
+echo "[progress:frames] done"; echo "[progress:frames] 1/9"; echo "[progress:ünï code] 50%"; echo "[progress:gone] 1/2"
+echo "[progress:gone] clear"; echo "[progress] fail boom"; exit 3'
+  BASH_EXE=$(command -v bash)
+  for impl in sh ps; do
+    cfg="$TMP/twin-$impl"
+    if [ $impl = sh ]; then
+      CLAUDE_CONFIG_DIR=$cfg CLAUDE_CODE_SESSION_ID=twin "$P" -n render bash -c "$JOB" > "$TMP/$impl.out" 2> "$TMP/$impl.err"
+    else
+      CLAUDE_CONFIG_DIR=$(native "$cfg") CLAUDE_CODE_SESSION_ID=twin "$PS" -NoProfile -ExecutionPolicy Bypass \
+        -File "$(native "$ROOT/scripts/claude-progress.ps1")" -n render "$(native "$BASH_EXE")" -c "$JOB" > "$TMP/$impl.out" 2> "$TMP/$impl.err"
+    fi
+    echo "$?" > "$TMP/$impl.status"
   done
-  check "the CommonJS shim passes every argument" "3/5 b.wav|" "$(lines js-shim)"
-  check "the ES module shim passes every argument" "4/5 c.wav|" "$(lines esm-shim)"
+  check "PowerShell keeps the exit status" "$(cat "$TMP/sh.status")" "$(cat "$TMP/ps.status")"
+  check "PowerShell writes the same run file as bash" "" "$(diff "$TMP"/twin-sh/progress/twin/* "$TMP"/twin-ps/progress/twin/* 2>&1)"
+  check "PowerShell writes the same output as bash" "$(cat "$TMP/sh.out")" "$(tr -d '\r' < "$TMP/ps.out")"
+  check "PowerShell writes the same errors as bash" "$(cat "$TMP/sh.err")" "$(tr -d '\r' < "$TMP/ps.err")"
+  out=$(env -u CLAUDE_CODE_SESSION_ID "$PS" -NoProfile -ExecutionPolicy Bypass -File "$(native "$ROOT/scripts/claude-progress.ps1")" "$(native "$BASH_EXE")" -c 'echo "[progress] 1/2"; exit 4' | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
+  check "PowerShell outside a session passes tags through and keeps the status" "[progress] 1/2|exit 4|" "$(printf '%s\n' "$out" | tr '\n' '|')"
+  out=$("$PS" -NoProfile -ExecutionPolicy Bypass -File "$(native "$ROOT/scripts/claude-progress.ps1")" no-such-command-xyz 2>&1 | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
+  check "PowerShell exits 127 for a missing command" "claude-progress: no-such-command-xyz: command not found|exit 127|" "$(printf '%s\n' "$out" | tr '\n' '|')"
 fi
 
 echo "$passed passed, $failed failed"

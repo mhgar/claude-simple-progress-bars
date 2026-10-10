@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: library-code
-description: Library code gets no progress reports, even for long work.
+description: Library code gets no progress tags, even for long work.
 tags: [write, avoid]
 execution:
   max_turns: 10
@@ -12,7 +12,7 @@ graders:
   - name: no-progress-in-library
     type: regex
     target: { source: file, path: images.py }
-    pattern: 'claude-progress'
+    pattern: 'claude-progress|\[progress'
     match: not_contains
   - name: wrote-module
     type: regex

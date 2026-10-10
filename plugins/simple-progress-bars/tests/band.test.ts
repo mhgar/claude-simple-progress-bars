@@ -3,6 +3,8 @@ import type { On } from 'claude-code'
 
 const PLUGIN = 'simple-progress-bars'
 const DIR = '/home/u/.claude/progress/s1'
+const RUN = '4242-1700000000'
+const CONVERT = 'task 1 - convert\n[1] 17/240 clip.mkv\nend\n'
 // On Windows the engine hands the fs hooks a native path: C:\home\u\... for /home/u/...
 const posix = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
 
@@ -34,7 +36,7 @@ function world(on: On, files: Record<string, string>, { envSetFails = false } = 
 
 describe('the band above the prompt', () => {
   test('draws a running task, while Claude works and after', async ($, on) => {
-    const clock = world(on, { convert: '17/240 clip.mkv\n' })
+    const clock = world(on, { [RUN]: CONVERT })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await clock.advance(300)
 
@@ -44,6 +46,26 @@ describe('the band above the prompt', () => {
       expect(await ui.find({ type: 'Text', text: /17\/240/ })).toBeDefined()
       await ui.unmount()
     }
+  })
+
+  test('draws a root with its subtask on an indented row', async ($, on) => {
+    const clock = world(on, { [RUN]: 'task 1 - render\n[1] 2/10\ntask 2 1 frames\n[2] 5/40\nend\n' })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await clock.advance(300)
+
+    const ui = await $.ui.mount(band())
+    expect(await ui.find({ type: 'Text', text: /render/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^ {4}$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /frames/ })).toBeDefined()
+  })
+
+  test('draws nothing for a half-written run file', async ($, on) => {
+    const clock = world(on, { [RUN]: 'task 1 - convert\n[1] 17/240\n' })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await clock.advance(300)
+
+    const ui = await $.ui.mount(band())
+    expect(await ui.findAll({ type: 'Text' })).toEqual([])
   })
 
   test('draws nothing with no task', async ($, on) => {
@@ -56,7 +78,7 @@ describe('the band above the prompt', () => {
   })
 
   test('gives the band to a survey', async ($, on) => {
-    const clock = world(on, { convert: '17/240 clip.mkv\n' })
+    const clock = world(on, { [RUN]: CONVERT })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await clock.advance(300)
 
@@ -65,7 +87,7 @@ describe('the band above the prompt', () => {
   })
 
   test('draws the bars even when the environment cannot be set', async ($, on) => {
-    const clock = world(on, { convert: '17/240 clip.mkv\n' }, { envSetFails: true })
+    const clock = world(on, { [RUN]: CONVERT }, { envSetFails: true })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await clock.advance(300)
 
