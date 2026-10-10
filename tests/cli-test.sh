@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Tests for scripts/claude-progress.sh, on Linux, macOS, and Git Bash on Windows.
 # Where PowerShell is installed, they also compare scripts/claude-progress.ps1 with it.
-# Run: tests/cli-test.sh. The checks write only to a temporary directory.
+# Run: tests/cli-test.sh from the repository root. The file lives outside the plugin, so it
+# does not ship. The checks write only to a temporary directory.
 # shellcheck disable=SC2016 # the commands in single quotes run in their own shell
 set -u
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../plugins/simple-progress-bars" && pwd)
 P="$ROOT/scripts/claude-progress.sh"
 TMP=$(mktemp -d)
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT

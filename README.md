@@ -56,7 +56,7 @@ The specs in [`openspec/specs`](openspec/specs) describe what each part must do,
 ```
 claude plugin validate plugins/simple-progress-bars     # check the manifest and hooks
 claude plugin test plugins/simple-progress-bars         # run the plugin tests
-plugins/simple-progress-bars/tests/cli-test.sh          # test the wrapper, and the PowerShell wrapper where PowerShell is installed
+tests/cli-test.sh                                       # test the wrapper, and the PowerShell wrapper where PowerShell is installed
 npx @fission-ai/openspec validate --specs --strict      # check the specs
 ```
 
