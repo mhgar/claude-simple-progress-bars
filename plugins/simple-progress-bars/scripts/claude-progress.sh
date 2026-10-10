@@ -335,7 +335,7 @@ finish() { # LINE STATE: ends each running task, and writes the file
 
 # --- Run ---------------------------------------------------------------------
 
-token="claude-progress-$$-$RANDOM$RANDOM"
+marker="claude-progress-$$-$RANDOM$RANDOM"
 child=
 signal_status=
 finished=
@@ -356,16 +356,16 @@ prefix() {
 
 # launch COMMAND...: runs the command, and writes both of its streams to one pipe.
 # Lines of standard output start with o, and lines of standard error with e. The
-# process ID and the exit status go through the same pipe, after the token. The
+# process ID and the exit status go through the same pipe, after the marker. The
 # pipe closes after the last line of both streams.
 launch() {
   exec 4>&1
   {
     {
       "$@" <&5 2>&1 1>&3 3>&- 4>&- 5<&- &
-      printf '%s pid %s\n' "$token" "$!" >&4
+      printf '%s pid %s\n' "$marker" "$!" >&4
       wait "$!"
-      printf '%s exit %s\n' "$token" "$?" >&4
+      printf '%s exit %s\n' "$marker" "$?" >&4
     } | prefix e E >&4
   } 3>&1 | prefix o O
 }
@@ -405,8 +405,8 @@ while :; do
   if IFS= read -r -t "$wait_s" line <&6; then
     line=$held$line held=
     case $line in
-      "$token pid "*) child=${line#"$token pid "} ;;
-      "$token exit "*) status=${line#"$token exit "} ;;
+      "$marker pid "*) child=${line#"$marker pid "} ;;
+      "$marker exit "*) status=${line#"$marker exit "} ;;
       [oeOE]*)
         text=${line:1}
         if tag "${text%$'\r'}"; then
