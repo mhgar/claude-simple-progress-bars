@@ -110,8 +110,8 @@ if [ -z "$IS_WINDOWS" ]; then
   check "TERM ends the running tasks as stopped" "task 1 - sig|[1] 1/5|[1] stopped|task 2 1 sub|[2] 1/2|[2] stopped|end|" "$(runfile sig)"
 fi
 wrap closed -n c sh -c 'for i in 1 2 3; do echo line$i; echo "[progress] $i/3"; sleep 0.2; done' | head -1 > /dev/null
-sleep 1
-check "a closed output does not stop the command" "[1] 3/3|[1] done" "$(runfile closed | cut -d'|' -f2-3)"
+for ((i = 0; i < 50; i++)); do [[ $(runfile closed) == *'[1] done'* ]] && break; sleep 0.1; done
+check "a closed output does not stop the command" "task 1 - c|[1] 3/3|[1] done|end|" "$(runfile closed)"
 
 # --- The run file
 

@@ -25,11 +25,7 @@ It needs Claude Code v2.1.287 or later, on Linux, macOS, or Windows. Start a new
 
 ## Use it in your own scripts
 
-Run the job through `claude-progress`, and print progress lines from it:
-
-```bash
-claude-progress -n "Convert videos" ./convert.sh
-```
+Print a `[progress]` line as your script works, and you get a live bar with a time estimate:
 
 ```bash
 # convert.sh
@@ -41,15 +37,15 @@ done
 echo "[progress] done"
 ```
 
-The progress lines do not show in the output. Every other line does. Any language works, also on a remote server over SSH. [`USAGE.md`](plugins/simple-progress-bars/USAGE.md) has the full reference.
+The progress lines stay out of the output, and any language works, even over SSH. See [`USAGE.md`](plugins/simple-progress-bars/USAGE.md) for more.
 
 ## Settings
 
-`minSeconds` (default 2): Claude shows progress for commands that it expects to run at least this long. Change it with `/plugin configure simple-progress-bars@simple-progress-bars`.
+Claude adds a bar to anything that it expects to take more than a couple of seconds. To change that, run `/plugin configure simple-progress-bars@simple-progress-bars`.
 
 ## Privacy
 
-- **Files:** the plugin writes only in `~/.claude/progress`, or in `$CLAUDE_CONFIG_DIR/progress` if you set that variable, and removes old files by itself.
+- **Files:** the plugin keeps a few small status files in your Claude folder, and cleans them up by itself.
 - **Claude Code:** the plugin adds one short section to Claude's instructions. It does not change your commands or the conversation.
 - **Network:** none. Nothing leaves your machine, apart from the SSH commands that you or Claude run.
 
@@ -60,7 +56,7 @@ The specs in [`openspec/specs`](openspec/specs) describe what each part must do,
 ```
 claude plugin validate plugins/simple-progress-bars     # check the manifest and hooks
 claude plugin test plugins/simple-progress-bars         # run the plugin tests
-plugins/simple-progress-bars/tests/cli-test.sh          # test the wrapper, and the PowerShell wrapper where pwsh is installed
+plugins/simple-progress-bars/tests/cli-test.sh          # test the wrapper, and the PowerShell wrapper where PowerShell is installed
 npx @fission-ai/openspec validate --specs --strict      # check the specs
 ```
 
