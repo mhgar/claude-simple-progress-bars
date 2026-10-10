@@ -95,3 +95,56 @@ describe('the band above the prompt', () => {
     expect(await ui.find({ type: 'Text', text: /convert/ })).toBeDefined()
   })
 })
+
+describe('presses in the band', () => {
+  const ROOT_KEY = `root:${DIR}/${RUN}#1`
+  const RENDER = 'task 1 - render\n[1] 2/10\ntask 2 1 frames\n[2] 5/40\ntask 3 1 upload\n[3] 1/3\nend\n'
+
+  test('a press on a root row collapses its subtasks, and a second press shows them again', async ($, on) => {
+    const clock = world(on, { [RUN]: RENDER })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await clock.advance(300)
+    const ui = await $.ui.mount(band())
+    expect(await ui.find({ type: 'Text', text: /frames/ })).toBeDefined()
+
+    await ui.press({ key: ROOT_KEY })
+    expect(await ui.find({ type: 'Text', text: /frames/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /\+2: 2 running/ })).toBeDefined()
+
+    await ui.press({ key: ROOT_KEY })
+    expect(await ui.find({ type: 'Text', text: /frames/ })).toBeDefined()
+  })
+
+  test('a press on the last line makes the band compact, and a second press expands it', async ($, on) => {
+    // Nine roots, two to a row in 120 columns: five rows of bars.
+    const files = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`${100 + i}-1700000000`, `task 1 - job${i}\n[1] 1/2\nend\n`]))
+    const clock = world(on, files)
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await clock.advance(300)
+    const ui = await $.ui.mount(band())
+    expect(await ui.find({ type: 'Text', text: /show less/ })).toBeDefined()
+
+    await ui.press({ key: 'band' })
+    expect(await ui.find({ type: 'Text', text: /▸ 1 more: 1 running/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /job8/ })).toBeUndefined()
+
+    await ui.press({ key: 'band' })
+    expect(await ui.find({ type: 'Text', text: /job8/ })).toBeDefined()
+  })
+
+  test('the plugin forgets a collapse when the root is gone', async ($, on) => {
+    const files: Record<string, string> = { [RUN]: RENDER }
+    const clock = world(on, files)
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await clock.advance(300)
+    const ui = await $.ui.mount(band())
+    await ui.press({ key: ROOT_KEY })
+
+    delete files[RUN]
+    await clock.advance(300)
+    files[RUN] = RENDER // only to look: a real root never comes back
+    await clock.advance(300)
+
+    expect(await ui.find({ type: 'Text', text: /frames/ })).toBeDefined()
+  })
+})

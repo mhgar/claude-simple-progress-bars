@@ -170,43 +170,92 @@ export function layout(bar: Bar, w: number, now: number, isSub = false): Piece[]
   return fit(bar, partsOf(bar, w, now, isStalled), w, now, color, isQuiet, isSub).filter(p => p.text !== '')
 }
 
-/** One row before it is drawn: its bars, whether they are subtasks, and a `+N` of hidden subtasks. */
-type RowPlan = { bars: Bar[]; isSub: boolean; moreSubs: number }
+/** What the person chose: the roots they collapsed, and the state of the band. `height` is the band's height in rows. */
+export type View = { collapsed: ReadonlySet<string>; isCompact: boolean; height: number }
 
-/** Splits `bars` into `count` rows of balanced length. */
-function balance(bars: readonly Bar[], count: number, isSub: boolean): RowPlan[] {
-  const each = Math.ceil(bars.length / count)
-  return Array.from({ length: count }, (_, r) => ({ bars: bars.slice(r * each, (r + 1) * each), isSub, moreSubs: 0 }))
-    .filter(row => row.bars.length > 0)
+/** What a press on a row does: toggle a root, or toggle the band. */
+export type Target = { root: string } | { band: true }
+
+/** One drawn row: its pieces, and the press target of a row that is a button. */
+export type Row = { pieces: Piece[]; target?: Target }
+
+const COMPACT_ROWS = 4
+const MARK_OPEN = '▾ '
+const MARK_SHUT = '▸ '
+const COUNT_ORDER = ['running', 'stalled', 'failed', 'stopped', 'done'] as const
+
+type Word = (typeof COUNT_ORDER)[number]
+
+function wordOf(bar: Bar, now: number): Word {
+  switch (bar.state) {
+    case 'complete':
+      return 'done'
+    case 'fail':
+      return 'failed'
+    case 'stopped':
+      return 'stopped'
+    case 'run':
+      return now - bar.activeAt > STALL_MS ? 'stalled' : 'running'
+  }
 }
 
-/** Draws one row in exactly `w` cells, with `moreText` at its end. */
-function draw(row: RowPlan, w: number, now: number, moreText: string): Piece[] {
+/** Counts bars by state: "2 running, 1 failed". States with no bar are left out. */
+export function counts(bars: readonly Bar[], now: number): string {
+  const n = new Map<Word, number>()
+  for (const b of bars) n.set(wordOf(b, now), (n.get(wordOf(b, now)) ?? 0) + 1)
+  return COUNT_ORDER.filter(w => n.has(w)).map(w => `${n.get(w)} ${w}`).join(', ')
+}
+
+/** One row before it is drawn. A root row of a block has a mark, and the bars behind its `+N`. */
+type Plan =
+  | { kind: 'bars'; bars: Bar[]; isSub: boolean }
+  | { kind: 'root'; root: Bar; isOpen: boolean; hidden: Bar[] }
+
+/** Splits `bars` into `count` rows of balanced length. */
+function balance(bars: readonly Bar[], count: number, isSub: boolean): Plan[] {
+  const each = Math.ceil(bars.length / count)
+  return Array.from({ length: count }, (_, r): Plan => ({ kind: 'bars', bars: bars.slice(r * each, (r + 1) * each), isSub }))
+    .filter(row => row.kind === 'bars' && row.bars.length > 0)
+}
+
+/** Draws a row of bars in exactly `w` cells, with ` │ ` between them. */
+function drawBars(bars: readonly Bar[], w: number, now: number, isSub: boolean): Piece[] {
   const sep = width(SEPARATOR)
-  const indent = row.isSub ? SUB_INDENT : ''
-  const tail = `${row.moreSubs > 0 ? `  +${row.moreSubs}` : ''}${moreText}`
-  const room = w - width(indent) - width(tail)
-  const cell = Math.floor((room - sep * (row.bars.length - 1)) / row.bars.length)
+  const indent = isSub ? SUB_INDENT : ''
+  const room = w - width(indent)
+  const cell = Math.floor((room - sep * (bars.length - 1)) / bars.length)
   const out: Piece[] = indent ? [{ text: indent }] : []
-  row.bars.forEach((bar, i) => {
+  bars.forEach((bar, i) => {
     if (i > 0) out.push({ text: SEPARATOR, dim: true })
-    out.push(...layout(bar, cell, now, row.isSub))
+    out.push(...layout(bar, cell, now, isSub))
   })
+  return out
+}
+
+/** Draws the row of a root with subtasks: its mark, its bar, and `+N` for subtasks that do not show. */
+function drawRoot(p: Extract<Plan, { kind: 'root' }>, w: number, now: number): Piece[] {
+  const mark = p.isOpen ? MARK_OPEN : MARK_SHUT
+  const plus = p.hidden.length > 0 ? `  +${p.hidden.length}` : ''
+  const withCounts = plus ? `${plus}: ${counts(p.hidden, now)}` : ''
+  // The counts give way first, before any part of the bar.
+  const tail = plus && w - width(mark) - width(withCounts) >= SEGMENT_MIN ? withCounts : plus
+  const out: Piece[] = [{ text: mark, dim: true }, ...layout(p.root, w - width(mark) - width(tail), now)]
   if (tail) out.push({ text: tail, dim: true })
   return out
 }
 
 /**
- * Lays the bars out in rows of `w` cells, at most `maxRows` of them. Each bar gets
- * at least SEGMENT_MIN cells. Roots with no visible subtasks pack together in
- * balanced rows. A root with visible subtasks gets a block: a row of its own, and
- * its subtasks in indented rows under it. The rows go first to roots, and subtasks
- * get the rows that are left. Roots that do not fit show as `+N` on the last row.
+ * Lays the bars out in rows of `w` cells. Each bar gets at least SEGMENT_MIN cells.
+ * Groups go in start order: a root with subtasks gets a block, with a row of its own
+ * and, while it is open, its subtasks in indented rows under it. Roots with no
+ * subtasks pack together in balanced rows. The rows stay within the band's height,
+ * or within 4 rows in a compact band, and a last line counts what does not show.
  */
-export function rows(bars: readonly Bar[], w: number, now: number, maxRows: number): Piece[][] {
+export function rows(bars: readonly Bar[], w: number, now: number, view: View): Row[] {
   if (bars.length === 0) return []
   const sep = width(SEPARATOR)
   const perRow = (cells: number) => Math.max(1, Math.floor((cells + sep) / (SEGMENT_MIN + sep)))
+  const subWidth = w - width(SUB_INDENT)
   const keys = new Set(bars.map(b => b.key))
   const subsOf = new Map<string, Bar[]>()
   const roots: Bar[] = []
@@ -216,49 +265,63 @@ export function rows(bars: readonly Bar[], w: number, now: number, maxRows: numb
   }
 
   // Groups in start order: a run of roots with no subtasks, or one block.
-  type Group = { plain: Bar[] } | { root: Bar; subs: Bar[] }
+  type Group = { run: Bar[] } | { root: Bar; subs: Bar[] }
   const groups: Group[] = []
   for (const root of roots) {
     const subs = subsOf.get(root.key)
     const last = groups[groups.length - 1]
     if (subs !== undefined) groups.push({ root, subs })
-    else if (last !== undefined && 'plain' in last) last.plain.push(root)
-    else groups.push({ plain: [root] })
+    else if (last !== undefined && 'run' in last) last.run.push(root)
+    else groups.push({ run: [root] })
   }
+  const isOpen = (g: { root: Bar }) => !view.collapsed.has(g.root.key)
+  const need = (g: Group) => 'run' in g
+    ? Math.ceil(g.run.length / perRow(w))
+    : 1 + (isOpen(g) ? Math.ceil(g.subs.length / perRow(subWidth)) : 0)
 
-  // Rows for the roots first.
-  let left = maxRows
-  let more = 0
-  const placed: { group: Group; rows: RowPlan[] }[] = []
-  for (const group of groups) {
-    if ('plain' in group) {
-      const fit = Math.min(group.plain.length, left * perRow(w))
-      more += group.plain.length - fit
-      if (fit === 0) continue
-      const count = Math.ceil(fit / perRow(w))
-      placed.push({ group, rows: balance(group.plain.slice(0, fit), count, false) })
-      left -= count
-    } else if (left > 0) {
-      placed.push({ group, rows: [{ bars: [group.root], isSub: false, moreSubs: 0 }] })
-      left -= 1
-    } else {
-      more += 1
+  // The rows of bars, and the last line, from the height table.
+  const total = groups.reduce((n, g) => n + need(g), 0)
+  const height = Math.max(1, view.height)
+  const fitsWhole = total <= COMPACT_ROWS && total <= height
+  const limit = fitsWhole ? total : view.isCompact ? Math.min(COMPACT_ROWS, height - 1) : Math.min(total, height - 1)
+
+  // Fill the rows group by group. After the first group that does not fit whole, the rest go to the last line.
+  let left = limit
+  const plans: Plan[] = []
+  const unseen: Bar[] = []
+  let isFull = false
+  for (const g of groups) {
+    const members = 'run' in g ? g.run : [g.root, ...g.subs]
+    if (isFull || left === 0) {
+      unseen.push(...members)
+      isFull = true
+      continue
     }
+    if ('run' in g) {
+      const fit = Math.min(g.run.length, left * perRow(w))
+      const count = Math.ceil(fit / perRow(w))
+      plans.push(...balance(g.run.slice(0, fit), count, false))
+      unseen.push(...g.run.slice(fit))
+      left -= count
+      isFull = fit < g.run.length
+      continue
+    }
+    const open = isOpen(g)
+    const subRows = open ? Math.min(left - 1, Math.ceil(g.subs.length / perRow(subWidth))) : 0
+    const shown = open ? Math.min(g.subs.length, subRows * perRow(subWidth)) : 0
+    plans.push({ kind: 'root', root: g.root, isOpen: open, hidden: g.subs.slice(shown) })
+    if (subRows > 0) plans.push(...balance(g.subs.slice(0, shown), subRows, true))
+    left -= 1 + subRows
+    isFull = open && shown < g.subs.length
   }
 
-  // Then the rows that are left, for subtasks, block by block.
-  const subWidth = w - width(SUB_INDENT)
-  for (const p of placed) {
-    if ('plain' in p.group) continue
-    const subs = p.group.subs
-    const count = Math.min(left, Math.ceil(subs.length / perRow(subWidth)))
-    const shown = Math.min(subs.length, count * perRow(subWidth))
-    const rootRow = p.rows[0]
-    if (rootRow !== undefined) rootRow.moreSubs = subs.length - shown
-    if (count > 0) p.rows.push(...balance(subs.slice(0, shown), count, true))
-    left -= count
-  }
+  const out: Row[] = plans.map(p => p.kind === 'root'
+    ? { pieces: drawRoot(p, w, now), target: { root: p.root.key } }
+    : { pieces: drawBars(p.bars, w, now, p.isSub) })
+  if (fitsWhole) return out
 
-  const plans = placed.flatMap(p => p.rows)
-  return plans.map((row, r) => draw(row, w, now, r === plans.length - 1 && more > 0 ? `  +${more}` : ''))
+  const more = unseen.length > 0 ? `${unseen.length} more: ${counts(unseen, now)}` : ''
+  const line = view.isCompact ? `▸ ${more}` : more ? `▴ show less · ${more}` : '▴ show less'
+  out.push({ pieces: [{ text: truncate(line, w), dim: true }], target: { band: true } })
+  return out
 }

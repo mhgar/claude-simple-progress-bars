@@ -50,6 +50,12 @@ export type Board = { bars: Bar[]; now: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'simple-progress-bars': { board: Board }
+    'simple-progress-bars': {
+      board: Board
+      /** The keys of the roots that the person collapsed. */
+      collapsed: string[]
+      /** True while the person keeps the band compact. */
+      isCompact: boolean
+    }
   }
 }

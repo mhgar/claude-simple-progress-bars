@@ -3,12 +3,15 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Bar, Board } from '../types'
 import { rows } from './layout'
+import type { Target } from './layout'
 import { parseRun } from './parse'
 import { promptSection } from './prompt'
 import { hide, ingest, isRunName, settle } from './watch'
 import type { Hidden, RunFile } from './watch'
 
 const board = atom({ plugin: 'simple-progress-bars', key: 'board' } as const, { bars: [], now: 0 } as Board)
+const collapsed = atom({ plugin: 'simple-progress-bars', key: 'collapsed' } as const, [] as string[])
+const isCompact = atom({ plugin: 'simple-progress-bars', key: 'isCompact' } as const, false)
 
 // 4 reads a second: the bar moves smoothly, and a read lists one small directory.
 const TICK_MS = 250
@@ -66,6 +69,9 @@ async function tick($: EngineInterface, w: Watch) {
     hide(w.hidden, expired, mtimes)
 
     if (bars.length > 0 || prev.bars.length > 0) await update($, board, () => ({ bars, now }))
+    // A root whose bar is gone can never come back, so its collapse is forgotten.
+    const shown = new Set(bars.map(b => b.key))
+    if ((await read($, collapsed)).some(key => !shown.has(key))) await update($, collapsed, list => list.filter(key => shown.has(key)))
   } finally {
     w.isBusy = false
   }
@@ -86,7 +92,6 @@ async function start($: EngineInterface, w: Watch) {
 }
 
 export const register: Register = (on, options) => {
-  const maxRows = typeof options.maxRows === 'number' ? Math.max(1, Math.round(options.maxRows)) : 3
   const minSeconds = typeof options.minSeconds === 'number' ? Math.max(1, options.minSeconds) : 2
   const w: Watch = {
     base: null, dirs: [], read: new Map(), hidden: new Map(), isBusy: false, ticks: 0,
@@ -110,16 +115,27 @@ export const register: Register = (on, options) => {
     const { bars, now } = await read($, board)
     if (bars.length === 0 || e.props.hasSurvey) return next(e)
 
-    const { Box, Text } = $.ui.resolve(e)
+    const view = { collapsed: new Set(await read($, collapsed)), isCompact: await read($, isCompact), height: e.props.maxRows }
+    // A press writes the state in a handler, never while drawing; the write draws the band again.
+    const press = (target: Target) => 'band' in target
+      ? update($, isCompact, value => !value)
+      : update($, collapsed, list => list.includes(target.root) ? list.filter(k => k !== target.root) : [...list, target.root])
+    const { Box, Button, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
-        {rows(bars, barWidth(e.props.bodyColumns), now, Math.min(maxRows, e.props.maxRows)).map((row, r) => (
-          <Box key={`row${r}`} flexDirection="row" paddingLeft={INDENT}>
-            {row.map((p, i) => (
-              <Text key={String(i)} color={p.color} dimColor={p.dim} bold={p.bold} wrap="truncate">{p.text}</Text>
-            ))}
-          </Box>
-        ))}
+        {rows(bars, barWidth(e.props.bodyColumns), now, view).map((row, r) => {
+          const texts = row.pieces.map((p, i) => (
+            <Text key={String(i)} color={p.color} dimColor={p.dim} bold={p.bold} wrap="truncate">{p.text}</Text>
+          ))
+          const target = row.target
+          return (
+            <Box key={`row${r}`} flexDirection="row" paddingLeft={INDENT}>
+              {target === undefined ? texts : (
+                <Button key={'band' in target ? 'band' : `root:${target.root}`} plain onPress={() => void press(target)}>{texts}</Button>
+              )}
+            </Box>
+          )
+        })}
       </Box>
     )
   })

@@ -87,7 +87,16 @@ The color tells you the state:
 - **Green, `done`:** the task is complete. The bar goes after 5 seconds.
 - **Red, `failed` or `stopped`:** the task failed, or its wrapper stopped before the task ended. The bar goes after 10 seconds.
 
-The time estimate shows `estimating…` until the task has made enough progress to measure. If many tasks run at once, the bars fill up to 3 rows, and a `+N` shows how many more there are.
+The time estimate shows `estimating…` until the task has made enough progress to measure.
+
+### Collapse and compact
+
+The band shows every bar by default. When it is too much, fold it down:
+
+- **A task with subtasks** has `▾` before its name. Press its row to hide the subtasks: the row then shows `▸` and `+3: 1 running, 1 failed, 1 done`. Press it again to show them.
+- **The whole band:** with more than 4 rows, the band ends with `▴ show less`. Press it to keep 4 rows and one line such as `▸ 3 more: 2 running, 1 failed`. Press that line to see everything again.
+
+To press a row, click it in Claude Code's fullscreen mode. In any mode, press `ctrl+x`, then `Tab`, to move to the bars. Then use Tab or the arrow keys, and Enter. Esc goes back to the prompt. Claude Code's own `[-]` mark beside the bars hides them all.
 
 ## Settings
 
@@ -95,8 +104,9 @@ Run `/plugin configure simple-progress-bars@simple-progress-bars` to change thes
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `maxRows` | `3` | The most rows of bars to show |
 | `minSeconds` | `2` | Claude runs commands through the wrapper when it expects them to run at least this long |
+
+Version 1.2.0 removed the `maxRows` setting. The band now fits the height that Claude Code gives it, and you can make it compact.
 
 ## How it works
 
