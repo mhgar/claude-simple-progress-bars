@@ -99,7 +99,13 @@ claude-progress -n render ssh -q HOST 'tail -n +1 -F render.log'
 - `stopped` while the job runs: the wrapper was killed, or the job is outside the wrapper.
 - `no update`: no tag for 30 s. Print tags more often, or a text status.
 
-## Behavior
-- Run file: `${CLAUDE_CONFIG_DIR:-~/.claude}/progress/<session id>/<pid>-<start>`. The wrapper rewrites it after each tag, and at least every 5 s. Folders of ended sessions go after 1 hour.
+## How it works
+The plugin has two parts: the wrapper, and a set of hooks inside Claude Code.
+1. The wrapper runs COMMAND, and reads its standard output and standard error. It reads the session ID from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in every shell call.
+2. The wrapper holds the state of each task in memory. After each tag, it rewrites one run file, `${CLAUDE_CONFIG_DIR:-~/.claude}/progress/<session id>/<pid>-<start>`. It also rewrites the file every 5 s while COMMAND is quiet.
+3. The plugin reads the session's folder 4 times a second, and draws a row for each task. A run file that has not changed for 15 s belongs to a wrapper that is gone, so its running tasks show `stopped`.
+
 - Tags cost no process, so print them at any rate.
 - Outside Claude Code, the wrapper runs COMMAND and passes every line through, also tags.
+- The plugin adds one section to Claude's system prompt, and sets no environment variables. The wrapper sets `PYTHONUNBUFFERED=1` for COMMAND only.
+- The wrapper removes the folders of ended sessions 1 hour after their Claude Code process exits.

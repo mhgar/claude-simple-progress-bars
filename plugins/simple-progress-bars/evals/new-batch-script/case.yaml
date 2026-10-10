@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: new-batch-script
-description: A new standalone script for a long batch job prints progress tags and needs no shim.
+description: A new standalone script for a long batch job prints progress tags.
 tags: [write, use]
 execution:
   max_turns: 10
@@ -13,7 +13,7 @@ graders:
     type: regex
     target: { source: file, path: convert.sh }
     pattern: '\[progress(?::[^\]]*)?\] '
-  - name: no-shim
+  - name: no-plugin-path
     type: regex
     target: { source: file, path: convert.sh }
     pattern: 'plugins/cache'

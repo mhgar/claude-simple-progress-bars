@@ -25,7 +25,7 @@ graders:
     type: regex
     target: { source: file, path: resize.ps1 }
     pattern: '\[progress(?::[^\]]*)?\] (?:(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)/(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\$\([^)]*\)|%\w|\{[^}]*\}|\d[\w.]*)|\S*%|total )'
-  - name: no-shim
+  - name: no-plugin-path
     type: regex
     target: { source: file, path: resize.py }
     pattern: 'plugins/cache'

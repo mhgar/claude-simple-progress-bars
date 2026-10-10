@@ -20,7 +20,7 @@ graders:
     type: regex
     target: { source: file, path: backup.sh }
     pattern: '\[progress(?::[^\]]*)?\] '
-  - name: no-shim
+  - name: no-plugin-path
     type: regex
     target: { source: file, path: backup.sh }
     pattern: 'plugins/cache'
