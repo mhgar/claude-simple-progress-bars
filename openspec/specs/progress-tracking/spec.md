@@ -45,11 +45,11 @@ A task that reaches its total MUST stay running until it ends.
 - **THEN** the bar shows `finishing…`
 
 ### Requirement: Expiry
-A done bar MUST go 5 seconds after it ends. A failed or stopped bar MUST go 10 seconds after it ends. These times MUST NOT depend on the wrapper or its command. A running bar MUST stay while its run file is not stale. The plugin MUST note a hidden bar by its run file and task ID, and a hidden bar MUST NOT show again. The one exception is a task that the plugin ended because its file was stale: it MUST show again when it runs again.
+A done, failed, or stopped bar MUST go 10 seconds after it ends. This time MUST NOT depend on the wrapper or its command. A running bar MUST stay while its run file is not stale. The plugin MUST note a hidden bar by its run file and task ID, and a hidden bar MUST NOT show again. The one exception is a task that the plugin ended because its file was stale: it MUST show again when it runs again.
 
 #### Scenario: Done while the command runs
 - **WHEN** a remote script prints `[progress] done`, and its SSH command runs on
-- **THEN** the bar goes 5 seconds after the end
+- **THEN** the bar goes 10 seconds after the end
 
 #### Scenario: A new run in an old file
 - **WHEN** a task ended and its bar went, and the script then prints a tag with the same name
