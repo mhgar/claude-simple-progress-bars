@@ -342,8 +342,9 @@ finished=
 
 # drop_output: after a failed write to a closed output. Bash 3 on macOS keeps the line
 # in the buffer of standard output, and writes it before the next output of the
-# wrapper, which is the run file. A flush to /dev/null drops it.
-drop_output() { printf '' > /dev/null 2>&1; }
+# wrapper, which is the run file. A flush to /dev/null drops it. printf flushes only
+# when it has something to print, so it prints one character.
+drop_output() { printf '%s' x > /dev/null 2>&1; }
 
 # prefix MARK LAST: copies lines with MARK first. A last line with no line end gets
 # the mark LAST, so the wrapper writes it back with no line end.
