@@ -25,7 +25,7 @@
 
 ## 5. Checks
 
-- [ ] 5.1 Run `tests/cli-test.sh` on Linux. Get the macOS and Windows CI jobs green. Linux: 73 passed, with PowerShell 7.6.6 for the twin. macOS and Windows: after the push.
+- [x] 5.1 Run `tests/cli-test.sh` on Linux. Get the macOS and Windows CI jobs green. Linux: 73 passed, with PowerShell 7.6.6 for the twin. macOS and Windows: CI green for 1.2.4.
 - [x] 5.2 Run `claude plugin test`, the type check, `claude plugin validate --strict`, and `openspec validate heartbeat-cleanup --strict`.
 - [ ] 5.3 Hands-on: run `examples/demo.sh`, and check that every state shows. Kill a wrapper with `KILL`, and check `stopped` at about 10 seconds and no bar at about 20 seconds. Done on disk: the migration emptied the real progress folder, and a killed wrapper wrote nothing more. The check on screen needs the 1.2.4 plugin.
 - [x] 5.4 Archive the change into `openspec/specs`.
