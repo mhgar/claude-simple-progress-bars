@@ -4,7 +4,7 @@ import type { Update } from './parse'
 /** No update for this long turns a running bar yellow. */
 export const STALL_MS = 30_000
 /** A run file that has not changed for this long belongs to a wrapper that is gone. */
-export const STALE_MS = 15_000
+export const STALE_MS = 10_000
 /** An ended bar, done, failed, or stopped, shows for this long. */
 const HOLD_MS = 10_000
 const SMOOTHING = 0.3 // tqdm's default: the weight of the newest rate sample

@@ -74,7 +74,7 @@ The wrapper sets `PYTHONUNBUFFERED=1` for COMMAND, so local Python works without
 - Status: `estimating…` until 3 counted updates or 2 s, then `~m:ss left`. `finishing…` at the total. `no update m:ss` (yellow) after 30 s with no tag. A subtask tag counts for its root.
 - `done`: green. `fail` and `stopped`: red. Each goes 10 s after it ends. This time does not depend on the wrapper or COMMAND.
 - Each task has its own row, and the rows form a table with aligned columns. A root with subtasks is marked `▾`, and its subtasks are on the rows under it. A press on the row collapses its subtasks into `+N` with counts by state, marked `▸`. The band shows every row, and ends with `▴ show less` past 4 rows. A press on it keeps 4 rows and a `▸ N more: …` line. To press, click in fullscreen mode, or press `ctrl+x`, then `Tab`, then Enter on the row.
-- A running bar stays while its wrapper runs, however long a step takes. If the wrapper stops without a chance to write, as after `KILL`, the bar shows `stopped` after 15 s.
+- A running bar stays while its wrapper runs, however long a step takes. If the wrapper stops without a chance to write, as after `KILL`, the bar shows `stopped` after 10 s.
 
 ## Background jobs
 The wrapper must run as long as the job. Put it outside `nohup`, `&`, and `setsid`:
@@ -105,9 +105,9 @@ claude-progress -n render ssh -q HOST 'tail -n +1 -F render.log'
 The plugin has two parts: the wrapper, and a set of hooks inside Claude Code.
 1. The wrapper runs COMMAND, and reads its standard output and standard error. It reads the session ID from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in every shell call.
 2. The wrapper holds the state of each task in memory. After a tag, it rewrites one run file, `${CLAUDE_CONFIG_DIR:-~/.claude}/progress/<session id>/<pid>-<start>`, at most every 0.2 s. It also rewrites the file every 5 s while COMMAND is quiet.
-3. The plugin reads the session's folder 4 times a second, and draws a row for each task. A run file that has not changed for 15 s belongs to a wrapper that is gone, so its running tasks show `stopped`.
+3. The plugin reads the session's folder 4 times a second, and draws a row for each task. A run file that has not changed for 10 s belongs to a wrapper that is gone or paused, so its running tasks show `stopped`. A paused wrapper writes its whole file again when it continues.
+4. At each start in a session, the wrapper deletes the files with no write for 1 to 2 minutes, in every session folder, and then the empty folders. Keep no other files in `<dir>`.
 
 - Tags cost no process, so print them at any rate.
 - Outside Claude Code, the wrapper runs COMMAND and passes every line through, also tags.
 - The plugin adds one section to Claude's system prompt, and sets no environment variables. The wrapper sets `PYTHONUNBUFFERED=1` for COMMAND only.
-- The wrapper removes the folders of ended sessions 1 hour after their Claude Code process exits.

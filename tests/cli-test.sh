@@ -27,7 +27,7 @@ check() {
 }
 
 exists() { [ -e "$1" ] && echo yes || echo no; }
-# await_file DIR: waits up to 10 s for a run file in DIR. The first write also sweeps old sessions.
+# await_file DIR: waits up to 10 s for a run file in DIR.
 await_file() { local i; for ((i = 0; i < 100; i++)); do [ -n "$(find "$1" -type f ! -name '.*' 2>/dev/null)" ] && return; sleep 0.1; done; }
 yes_if() { if "$@"; then echo yes; else echo no; fi; }
 matches() { [[ $1 =~ $2 ]]; }
@@ -160,12 +160,31 @@ check "-n with no value warns" "claude-progress: -n needs a value" "$out"
 out=$("$P" -n x 2>&1)
 check "no command warns" "claude-progress: no command to run. See claude-progress --help" "$out"
 if [ -z "$IS_WINDOWS" ]; then
-  mkdir -p "$BASE/ro-session" && chmod 500 "$BASE/ro-session"
+  # A file keeps the cleanup from deleting the empty directory.
+  mkdir -p "$BASE/ro-session" && echo end > "$BASE/ro-session/keep" && chmod 500 "$BASE/ro-session"
   out=$(wrap ro-session -n x sh -c 'echo "[progress] 1/2"; echo ran; exit 5' 2>&1)
   check "a failed write keeps the exit status" 5 "$?"
   check "a failed write warns once, and the command runs" yes "$(yes_if matches "$out" '^claude-progress: cannot write[^'$'\n'']*'$'\n''ran$')"
   chmod 700 "$BASE/ro-session"
+
+  mkdir -p "$BASE/ro-back" && echo end > "$BASE/ro-back/keep" && chmod 500 "$BASE/ro-back"
+  wrap ro-back -n x sh -c 'echo "[progress] 1/2"; sleep 2; echo "[progress] 2/2"' 2>/dev/null &
+  w=$!
+  sleep 1
+  chmod 700 "$BASE/ro-back"
+  wait $w
+  check "writes work again after write access comes back" "task 1 - x|[1] 2/2|[1] done|end|" "$(tr '\n' '|' < "$(ls "$BASE"/ro-back/[0-9]*)")"
 fi
+
+# --- Write again after a delete
+
+CLAUDE_CODE_SESSION_ID=gone "$P" -n g sh -c 'echo "[progress] 1/2"; sleep 2; echo "[progress] 2/2"' &
+w=$!
+await_file "$BASE/gone"
+rm -rf "$BASE/gone"
+wait $w
+check "a deleted session directory comes back at the next write" "task 1 - g|[1] 2/2|[1] done|end|" "$(runfile gone)"
+[ -z "$IS_WINDOWS" ] && check "a directory made again is private" 700 "$(stat -c %a "$BASE/gone" 2>/dev/null || stat -f %Lp "$BASE/gone")"
 
 # --- Directories and help
 
@@ -173,49 +192,35 @@ check "--dir prints the progress directory" "$BASE" "$("$P" --dir)"
 check "--dir uses ~/.claude without CLAUDE_CONFIG_DIR" "$HOME/.claude/progress" "$(env -u CLAUDE_CONFIG_DIR "$P" --dir)"
 check "no arguments prints the help" yes "$(yes_if eval '"$P" | grep -q "^Usage:"')"
 
-# --- Cleanup of old sessions
+# --- Cleanup
 
-# The pid of a live process, as Claude Code gives it in CLAUDE_PID: a Windows pid in Git Bash.
-if [ -n "$IS_WINDOWS" ]; then LIVE_PID=$(cat /proc/$$/winpid); else LIVE_PID=$$; fi
-# stamp DAYS_AGO: prints a touch -t time, on GNU and BSD date.
+# stamp SECONDS_AGO: prints a touch -t time, on GNU and BSD date.
 stamp() {
-  local t=$(($(date +%s) - $1 * 86400))
-  date -d "@$t" +%Y%m%d%H%M 2>/dev/null || date -r "$t" +%Y%m%d%H%M
+  local t=$(($(date +%s) - $1))
+  date -d "@$t" +%Y%m%d%H%M.%S 2>/dev/null || date -r "$t" +%Y%m%d%H%M.%S
 }
-# session NAME OWNER_JSON DAYS_AGO: makes a session directory with one run file, all that old.
-session() {
-  mkdir -p "$BASE/$1" && printf 'task 1 - x\nend\n' > "$BASE/$1/1-1700000000"
-  if [ -n "$2" ]; then printf '%s' "$2" > "$BASE/$1/.owner"; fi
-  # -c: create no file. The directory goes last, because a change inside it moves its time.
-  touch -c -t "$(stamp "$3")" "$BASE/$1/"* "$BASE/$1/.owner" "$BASE/$1"
-}
-sweeps=0
-sweep() { sweeps=$((sweeps + 1)); wrap "sweeper-$sweeps" sh -c 'echo "[progress] 1/2"'; }
+# leftover DIR FILE SECONDS_AGO: makes a file in DIR with its last write that long ago.
+leftover() { mkdir -p "$1" && printf 'task 1 - x\nend\n' > "$1/$2" && touch -c -t "$(stamp "$3")" "$1/$2"; }
 
-CLAUDE_PID=$LIVE_PID wrap owned sh -c 'echo "[progress] 1/2"'
-check "a new session records its owner" yes "$(yes_if grep -q "\"pid\":$LIVE_PID" "$BASE/owned/.owner")"
-touch -c -t "$(stamp 30)" "$BASE/owned/"* "$BASE/owned/.owner" "$BASE/owned"
-env -u CLAUDE_PID CLAUDE_CODE_SESSION_ID=no-owner "$P" sh -c 'echo "[progress] 1/2"'
-check "with no CLAUDE_PID, a session records no owner" no "$(exists "$BASE/no-owner/.owner")"
+CLAUDE_PID=$$ wrap owned sh -c 'echo "[progress] 1/2"'
+check "a run writes no .owner file, also with CLAUDE_PID set" no "$(exists "$BASE/owned/.owner")"
 
-session dead-old '{"pid":999999,"procStart":"1"}' 1
-session dead-recent '{"pid":999999,"procStart":"1"}' 0
-session dead-written '{"pid":999999,"procStart":"1"}' 1
-touch "$BASE/dead-written/1-1700000000" # a write changes the file, not the directory
-session orphan-recent '' 2
-session orphan-old '' 8
-[ -z "$IS_WINDOWS" ] && session reused "{\"pid\":$LIVE_PID,\"procStart\":\"123\"}" 1
-sweep
+# Each start in a session cleans up, so the old files come after the last such start.
+leftover "$BASE/ended" 1-1700000000 180
+leftover "$BASE/ended" .owner 172800
+leftover "$BASE/mixed" 2-1700000000 180
+leftover "$BASE/mixed" 3-1700000000 5
+env -u CLAUDE_CODE_SESSION_ID "$P" true
+check "outside a session nothing goes" yes "$(exists "$BASE/ended/1-1700000000")"
+wrap sweeper true
 
-check "a session with a live owner stays, however old" yes "$(exists "$BASE/owned")"
-check "a dead owner's session goes after 1 hour" no "$(exists "$BASE/dead-old")"
-check "a dead owner's session stays within 1 hour" yes "$(exists "$BASE/dead-recent")"
-check "a recent write keeps a dead owner's session" yes "$(exists "$BASE/dead-written")"
-check "a session with no owner stays for 7 days" yes "$(exists "$BASE/orphan-recent")"
-check "a session with no owner goes after 7 days" no "$(exists "$BASE/orphan-old")"
-[ -z "$IS_WINDOWS" ] && check "a reused pid does not keep a session" no "$(exists "$BASE/reused")"
+check "a file with no write for 3 minutes goes" no "$(exists "$BASE/mixed/2-1700000000")"
+check "a file with a write 5 seconds ago stays" yes "$(exists "$BASE/mixed/3-1700000000")"
+check "an old .owner goes" no "$(exists "$BASE/ended/.owner")"
+check "an empty session directory goes" no "$(exists "$BASE/ended")"
+check "a run with no tag creates no directory" no "$(exists "$BASE/sweeper")"
 
-check "no temporary files are left" 0 "$(find "$BASE" -name '.*' ! -name .owner -type f | wc -l | tr -d ' ')"
+check "no temporary files are left" 0 "$(find "$BASE" -name '.*' -type f | wc -l | tr -d ' ')"
 
 # --- The PowerShell twin, where it is installed
 #
@@ -257,6 +262,27 @@ echo "[progress:gone] clear"; echo "[progress] fail boom"; exit 3'
   sleep 0.5
   check "PowerShell: a held tag reaches the file" "[1] 2/3" "$(cat "$TMP"/held-ps/progress/held/* 2>/dev/null | sed -n 2p)"
   wait $w
+
+  PSB="$TMP/sweep-ps/progress"
+  leftover "$PSB/closed" 1-1700000000 180
+  leftover "$PSB/mixed" 2-1700000000 180
+  leftover "$PSB/mixed" 3-1700000000 5
+  CLAUDE_CONFIG_DIR=$(native "$TMP/sweep-ps") CLAUDE_CODE_SESSION_ID=sweeper "$PS" -NoProfile -ExecutionPolicy Bypass \
+    -File "$(native "$ROOT/scripts/claude-progress.ps1")" "$(native "$BASH_EXE")" -c 'true'
+  check "PowerShell: a file with no write for 3 minutes goes" no "$(exists "$PSB/mixed/2-1700000000")"
+  check "PowerShell: a file with a write 5 seconds ago stays" yes "$(exists "$PSB/mixed/3-1700000000")"
+  check "PowerShell: an empty session directory goes" no "$(exists "$PSB/closed")"
+
+  CLAUDE_CONFIG_DIR=$(native "$TMP/gone-ps") CLAUDE_CODE_SESSION_ID=gone "$PS" -NoProfile -ExecutionPolicy Bypass \
+    -File "$(native "$ROOT/scripts/claude-progress.ps1")" -n g "$(native "$BASH_EXE")" -c 'echo "[progress] 1/2"; sleep 2; echo "[progress] 2/2"' &
+  w=$!
+  await_file "$TMP/gone-ps/progress/gone"
+  rm -rf "$TMP/gone-ps/progress/gone"
+  wait $w
+  check "PowerShell: a deleted session directory comes back at the next write" "task 1 - g|[1] 2/2|[1] done|end|" \
+    "$(cat "$TMP"/gone-ps/progress/gone/* 2>/dev/null | tr '\n' '|')"
+  [ -z "$IS_WINDOWS" ] && check "PowerShell: a directory made again is private" 700 \
+    "$(stat -c %a "$TMP/gone-ps/progress/gone" 2>/dev/null || stat -f %Lp "$TMP/gone-ps/progress/gone")"
   if [ -n "$IS_WINDOWS" ]; then
     # cmd.exe reads the command line of a batch file first. Each argument must reach the script as text.
     { printf '@echo off\r\nsetlocal EnableDelayedExpansion\r\n'

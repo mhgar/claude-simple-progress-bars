@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { Bar } from '../types'
 import { parseRun } from '../hooks/parse'
-import { hide, ingest, isRunName, settle } from '../hooks/watch'
+import { hide, ingest, settle } from '../hooks/watch'
 import type { Hidden, RunFile } from '../hooks/watch'
 
 const F = '/s/100-1700000000'
@@ -53,29 +53,35 @@ describe('ingest', () => {
     expect(ingest(new Map(), [runFile(5, 'task 1 - r')], hidden).length).toBe(0)
     expect(ingest(new Map(), [runFile(6, 'task 1 - r')], hidden).length).toBe(1)
   })
-})
 
-describe('isRunName', () => {
-  for (const [name, expected] of [['4242-1700000000', true], ['.owner', false]] as const) {
-    test(`${name}: ${expected}`, () => {
-      expect(isRunName(name)).toBe(expected)
-    })
-  }
+  test('a file with no end line, such as an old .owner record, shows no bar', () => {
+    const owner = { file: '/s/.owner', mtimeMs: 5, tasks: parseRun('{"pid":42,"procStart":"1"}\n') }
+
+    expect(ingest(new Map(), [owner], new Map())).toEqual([])
+  })
 })
 
 describe('settle', () => {
   const bars = (at: number) => ingest(new Map(), [runFile(at, 'task 1 - r', '[1] 1/3')], new Map())
 
   test('a running bar of a fresh file keeps running', () => {
-    expect(settle(bars(0), mtimes(0), 15_000).bars[0]?.state).toBe('run')
+    expect(settle(bars(0), mtimes(0), 10_000).bars[0]?.state).toBe('run')
   })
 
-  test('a running bar of a file older than 15 s shows stopped', () => {
-    expect(settle(bars(0), mtimes(0), 15_001).bars[0]).toMatchObject({ state: 'stopped', isStale: true })
+  test('a running bar of a file older than 10 s shows stopped', () => {
+    expect(settle(bars(0), mtimes(0), 10_001).bars[0]).toMatchObject({ state: 'stopped', isStale: true })
+  })
+
+  test('a stalled bar whose file gets heartbeats stays for 1 hour', () => {
+    const beat = ingest(byKey(bars(0)), [runFile(3_600_000, 'task 1 - r', '[1] 1/3')], new Map())
+
+    const { bars: kept, expired } = settle(beat, mtimes(3_600_000), 3_600_100)
+
+    expect([kept[0]?.state, kept[0]?.activeAt, expired.length]).toEqual(['run', 0, 0])
   })
 
   test('a stale bar runs again when its file changes', () => {
-    const stopped = settle(bars(0), mtimes(0), 15_001).bars
+    const stopped = settle(bars(0), mtimes(0), 10_001).bars
 
     expect(settle(stopped, mtimes(20_000), 20_100).bars[0]?.state).toBe('run')
   })
@@ -99,7 +105,7 @@ describe('settle', () => {
 
   test('hides a stale bar only until its file changes', () => {
     const hidden: Hidden = new Map()
-    const { expired } = settle(bars(0), mtimes(0), 26_000)
+    const { expired } = settle(bars(0), mtimes(0), 21_000)
 
     hide(hidden, expired, mtimes(0))
 

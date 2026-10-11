@@ -31,26 +31,8 @@ The wrapper MUST NOT change the output or the exit status of COMMAND, apart from
 - **WHEN** no session ID is set, and a script runs `claude-progress.ps1 bash -c 'echo "[progress] 1/2"; exit 4'` in Windows PowerShell 5.1
 - **THEN** the standard output holds `[progress] 1/2`, and the exit status is 4
 
-### Requirement: Session owner
-When a call creates a session directory and `CLAUDE_PID` is set, it MUST write `.owner` there: a JSON object with `pid` and `procStart`, the start time of that process, as Claude Code keeps them in `~/.claude/sessions`. The owner MUST count as alive while the process runs and its start time is the same. Windows MUST check the pid with `tasklist`.
-
-#### Scenario: A reused pid
-- **WHEN** the pid in `.owner` runs again, but with another start time
-- **THEN** the owner counts as dead
-
-### Requirement: Old sessions
-When a call creates a new session directory, it MUST check the other session directories. A directory with a live owner MUST stay. One with a dead owner MUST go 1 hour after its newest write, and one with no owner record 7 days after it. The newest write MUST be the newest time of any entry in the directory.
-
-#### Scenario: A long task
-- **WHEN** a task of a live session has written nothing for 2 days
-- **THEN** its session directory stays
-
-#### Scenario: An append
-- **WHEN** a dead owner's directory is 2 days old, but a file in it got an append 10 minutes ago
-- **THEN** the directory stays
-
 ### Requirement: Twins
-`scripts/claude-progress.ps1` MUST take the same arguments as the bash wrapper, `scripts/claude-progress.sh`, and MUST write the same run file content for the same output of COMMAND: UTF-8 with no byte order mark, and LF line ends. It MUST follow the same rules for the session ID, names, tags, ends, the heartbeat, owner records, old sessions, and exit status. Both wrappers MUST live in `scripts/`. The plugin MUST NOT have a `bin/` folder, and MUST NOT put any folder on the `PATH`. The plugin MUST NOT set environment variables of the session or change configuration.
+`scripts/claude-progress.ps1` MUST take the same arguments as the bash wrapper, `scripts/claude-progress.sh`, and MUST write the same run file content for the same output of COMMAND: UTF-8 with no byte order mark, and LF line ends. It MUST follow the same rules for the session ID, names, tags, ends, the heartbeat, the cleanup, the write again after a failure, and exit status. Both wrappers MUST live in `scripts/`. The plugin MUST NOT have a `bin/` folder, and MUST NOT put any folder on the `PATH`. The plugin MUST NOT set environment variables of the session or change configuration.
 
 #### Scenario: The same calls
 - **WHEN** the same COMMAND output runs through the bash wrapper and through the PowerShell wrapper, in separate config directories
@@ -174,3 +156,41 @@ When COMMAND is a `.cmd` or `.bat` file, the PowerShell wrapper MUST quote each 
 #### Scenario: Special characters
 - **WHEN** a script runs `claude-progress.ps1 t.cmd "a&b" "two words" "%PATH%" "x=y"`, and `t.cmd` prints `%~1`, `%~2`, `%~3`, and `%~4`
 - **THEN** the output is `a&b`, `two words`, `%PATH%`, and `x=y`, and no other command runs
+
+### Requirement: Cleanup
+With a valid session ID, after it starts COMMAND and before it reads any output, the wrapper MUST delete each file in each session directory under `<config>/progress` that has had no write for 120 seconds. It MUST NOT delete a file with a write in the last 60 seconds. Then it MUST delete each empty session directory. The cleanup MUST NOT check any process. Without a valid session ID, the wrapper MUST delete nothing.
+
+#### Scenario: A closed session
+- **WHEN** the directory of another session holds only run files with no write for 3 minutes, and a wrapper starts
+- **THEN** the wrapper deletes these files and the directory
+
+#### Scenario: A live run of another session
+- **WHEN** a run file of another session had a write 5 seconds ago, and a wrapper starts
+- **THEN** that run file stays
+
+#### Scenario: A file of an earlier version
+- **WHEN** a session directory holds a `.owner` file with no write for 2 days, and a wrapper starts
+- **THEN** the wrapper deletes `.owner`
+
+#### Scenario: A run with no tag
+- **WHEN** COMMAND prints no tag line, and old files exist
+- **THEN** the wrapper deletes the old files, and creates no run file and no directory
+
+#### Scenario: Outside Claude Code
+- **WHEN** no session ID is set, and old files exist
+- **THEN** the wrapper deletes nothing
+
+### Requirement: Write again
+After each failed write of the run file, the wrapper MUST create the session directory again, with the mode 700 where the system has modes, and write the whole file once more. When that write also fails, the wrapper MUST print its warning, but only the first time in the run. A failed write MUST NOT stop later writes.
+
+#### Scenario: A paused wrapper after a cleanup
+- **WHEN** a wrapper is paused, another wrapper deletes its run file and its session directory, and the first wrapper then continues
+- **THEN** its next write creates the directory and the run file again, with the full state of its tasks
+
+#### Scenario: A directory with no write access
+- **WHEN** the session directory exists, and the wrapper cannot write in it
+- **THEN** the wrapper prints one warning for the whole run, and COMMAND runs to its end
+
+#### Scenario: Write access comes back
+- **WHEN** writes to the session directory fail for a time, and then work again
+- **THEN** the next write after that puts the full state of the tasks in the run file

@@ -38,38 +38,24 @@ Options:
 
 Outside a Claude Code session, the wrapper runs COMMAND and changes nothing.
 Files: <dir>/<session id>/<pid>-<start>, where <dir> is $env:CLAUDE_CONFIG_DIR/progress,
-or ~/.claude/progress. A session directory stays while its Claude Code process
-runs. After that it goes 1 hour after its last write.
+or ~/.claude/progress. At each start in a session, the wrapper deletes the files
+in <dir> with no write for 1 to 2 minutes, and the empty session directories.
 '@
 }
 
 function Write-Warn([string]$Message) { [Console]::Error.WriteLine("claude-progress: $Message") }
 
-# Prints alive, dead, or unknown for the Claude Code process that owns a session directory.
-function Get-OwnerState([string]$Dir) {
-  $record = Join-Path $Dir '.owner'
-  if (-not (Test-Path -LiteralPath $record)) { return 'unknown' }
-  $match = [regex]::Match([IO.File]::ReadAllText($record), '"pid":(\d+)')
-  if (-not $match.Success) { return 'unknown' }
-  if (Get-Process -Id ([int]$match.Groups[1].Value) -ErrorAction SilentlyContinue) { return 'alive' }
-  return 'dead'
-}
-
-# Removes the session directories of other sessions that are over. A directory stays
-# while its owner runs. With a dead owner it goes 1 hour after its newest write, and
-# with no owner record 7 days after it.
-function Invoke-Sweep([string]$Base, [string]$Own) {
+# Deletes what ended runs left, in every session directory. A live wrapper writes its file
+# at least every 5 seconds, so a file with no write for a minute belongs to a run that is
+# over or paused. A paused run writes its whole file again when it continues.
+# The .NET calls fail where Remove-Item can prompt, as for a directory that is no longer empty.
+function Invoke-Sweep([string]$Base) {
+  $limit = [DateTime]::UtcNow.AddSeconds(-60)
   foreach ($d in Get-ChildItem -LiteralPath $Base -Directory -Force -ErrorAction SilentlyContinue) {
-    if ($d.FullName -eq $Own) { continue }
-    $state = Get-OwnerState $d.FullName
-    if ($state -eq 'alive') { continue }
-    $minutes = if ($state -eq 'dead') { 60 } else { 10080 }
-    # The newest entry counts: a write changes a file, not its directory.
-    $times = @($d.LastWriteTime) + @(Get-ChildItem -LiteralPath $d.FullName -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.LastWriteTime })
-    $newest = ($times | Measure-Object -Maximum).Maximum
-    if ($newest -lt (Get-Date).AddMinutes(-$minutes)) {
-      Remove-Item -LiteralPath $d.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    foreach ($f in Get-ChildItem -LiteralPath $d.FullName -File -Force -ErrorAction SilentlyContinue) {
+      if ($f.LastWriteTimeUtc -lt $limit) { try { [IO.File]::Delete($f.FullName) } catch { } }
     }
+    try { [IO.Directory]::Delete($d.FullName) } catch { } # only when empty
   }
 }
 
@@ -238,7 +224,8 @@ function Get-Tag([string]$Line) {
 # --- The run file --------------------------------------------------------------
 
 $script:file = ''
-$script:noFile = $false
+$script:dir = ''
+$script:warned = $false
 $script:lastWrite = [long]0
 # The plugin reads run files 4 times a second, so more writes only slow COMMAND down.
 $writeMs = 200
@@ -246,17 +233,11 @@ $script:lastWriteMs = [long]-1000000
 $script:dirty = $false
 $utf8 = New-Object Text.UTF8Encoding $false
 
+# Names the run file, at the first tag. A failed write creates the directory.
 function Open-File {
-  if ($script:file -or $script:noFile) { return }
-  $dir = Join-Path $base $session
-  if (-not (Test-Path -LiteralPath $dir)) {
-    try { New-Item -ItemType Directory -Force -Path $dir | Out-Null } catch { Write-Warn "cannot create $dir"; $script:noFile = $true; return }
-    if ($env:CLAUDE_PID -match '^\d+$') {
-      try { [IO.File]::WriteAllText((Join-Path $dir '.owner'), "{`"pid`":$($env:CLAUDE_PID),`"procStart`":`"`"}`n", $utf8) } catch { }
-    }
-    try { Invoke-Sweep $base $dir } catch { } # A new session also removes what old sessions left.
-  }
-  $script:file = Join-Path $dir "$PID-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+  if ($script:file) { return }
+  $script:dir = Join-Path $base $session
+  $script:file = Join-Path $script:dir "$PID-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
 }
 
 # Rewrites the whole run file from memory.
@@ -280,9 +261,19 @@ function Write-RunFile {
   }
   # The plugin uses a read only when it ends with this line, so a half-written file never counts.
   [void]$sb.Append("end`n")
-  try { [IO.File]::WriteAllText($script:file, $sb.ToString(), $utf8) } catch {
-    Write-Warn "cannot write $($script:file)"
-    $script:noFile = $true; $script:file = ''
+  # A sweep can delete the directory of a new or paused run. So a failed write creates it
+  # and tries once more. A failure never stops later writes, but it warns only once.
+  $text = $sb.ToString()
+  try { [IO.File]::WriteAllText($script:file, $text, $utf8) } catch {
+    try {
+      # Private where the system has modes. Windows PowerShell 5.1 has no $IsLinux and no modes.
+      if ($IsLinux -or $IsMacOS) { [void][IO.Directory]::CreateDirectory($script:dir, [IO.UnixFileMode]'UserRead, UserWrite, UserExecute') }
+      else { [void][IO.Directory]::CreateDirectory($script:dir) }
+      [IO.File]::WriteAllText($script:file, $text, $utf8)
+    } catch {
+      if (-not $script:warned) { Write-Warn "cannot write $($script:file)" }
+      $script:warned = $true
+    }
   }
   $script:lastWrite = $now
   $script:lastWriteMs = $clock.ElapsedMilliseconds
@@ -328,6 +319,7 @@ $finished = $false
 $last = ''
 try {
   $proc = [Diagnostics.Process]::Start($info)
+  try { Invoke-Sweep $base } catch { } # after the start, so that COMMAND never waits for it
   $readers = @{ out = $proc.StandardOutput; err = $proc.StandardError }
   $pending = @{ out = $readers.out.ReadLineAsync(); err = $readers.err.ReadLineAsync() }
   while ($pending.Count -gt 0) {

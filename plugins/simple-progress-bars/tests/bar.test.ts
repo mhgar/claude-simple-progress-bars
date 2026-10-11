@@ -59,13 +59,13 @@ describe('apply', () => {
 
 describe('stale and revive', () => {
   test('a stale running bar shows stopped from the time the file went stale', () => {
-    const bar = stale(run('job', [[{ done: 1, total: 3 }, 0]]), 15_000)
+    const bar = stale(run('job', [[{ done: 1, total: 3 }, 0]]), 10_000)
 
-    expect(bar).toMatchObject({ state: 'stopped', isStale: true, endedAt: 15_000 })
+    expect(bar).toMatchObject({ state: 'stopped', isStale: true, endedAt: 10_000 })
   })
 
   test('a stale bar runs again with its start time', () => {
-    const bar = revive(stale(run('job', [[{ done: 1, total: 3 }, 0]]), 15_000))
+    const bar = revive(stale(run('job', [[{ done: 1, total: 3 }, 0]]), 10_000))
 
     expect(bar).toMatchObject({ state: 'run', isStale: false, endedAt: null, startedAt: 0 })
   })
@@ -73,7 +73,7 @@ describe('stale and revive', () => {
   test('an ended bar does not go stale', () => {
     const done = run('job', [[{ state: 'done', done: 3, total: 3 }, 0]])
 
-    expect(stale(done, 15_000).state).toBe('complete')
+    expect(stale(done, 10_000).state).toBe('complete')
   })
 })
 

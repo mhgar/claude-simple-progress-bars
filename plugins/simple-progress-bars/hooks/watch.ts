@@ -10,9 +10,6 @@ export type RunFile = {
   tasks: RunTask[] | null
 }
 
-/** Returns true for a run file. Dot files are the session's owner record. */
-export const isRunName = (name: string) => !name.startsWith('.')
-
 /** The key of one task: unique across the watched session directories. */
 export const taskKey = (file: string, id: number) => `${file}#${id}`
 

@@ -41,72 +41,22 @@ Options:
 
 Outside a Claude Code session, the wrapper runs COMMAND and changes nothing.
 Files: <dir>/<session id>/<pid>-<start>, where <dir> is $CLAUDE_CONFIG_DIR/progress,
-or ~/.claude/progress. A session directory stays while its Claude Code process
-runs. After that it goes 1 hour after its last write.
+or ~/.claude/progress. At each start in a session, the wrapper deletes the files
+in <dir> with no write for 1 to 2 minutes, and the empty session directories.
 EOF
 }
 
 warn() { printf 'claude-progress: %s\n' "$1" >&2; }
 
-# --- Session owners ---------------------------------------------------------
-# Each session directory has a dot file .owner with the pid and the start time
-# of its Claude Code process, as Claude Code keeps in ~/.claude/sessions. The
-# start time tells a live owner from a new process that got the same pid.
-
-is_windows() { case $(uname -s) in MINGW* | MSYS* | CYGWIN*) return 0 ;; esac; return 1; }
-
-# proc_start PID: prints the start time of a process, or nothing where it is unknown.
-proc_start() {
-  if [ -r "/proc/$1/stat" ] && ! is_windows; then
-    local stat fields
-    stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
-    # Field 22. The process name (field 2) can hold spaces, so count from after its ")".
-    read -ra fields <<< "${stat##*) }"
-    printf '%s' "${fields[19]-}"
-  elif ! is_windows; then
-    ps -o lstart= -p "$1" 2>/dev/null | tr -s ' '
-  fi
-}
-
-# owner_state DIR: prints alive, dead, or unknown for the owner of a session directory.
-owner_state() {
-  local record pid start now
-  record=$(cat "$1/.owner" 2>/dev/null) || { echo unknown; return; }
-  pid=$(printf '%s' "$record" | sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p')
-  start=$(printf '%s' "$record" | sed -n 's/.*"procStart":"\([^"]*\)".*/\1/p')
-  [ -n "$pid" ] || { echo unknown; return; }
-  if is_windows; then
-    # Git Bash kill knows only its own pids. CLAUDE_PID is a Windows pid.
-    command -v tasklist >/dev/null || { echo unknown; return; }
-    case " $(tasklist //FI "PID eq $pid" //NH 2>/dev/null | tr -s ' ') " in
-      *" $pid "*) echo alive ;;
-      *) echo dead ;;
-    esac
-    return
-  fi
-  case $(kill -0 "$pid" 2>&1) in
-    '' | *[Pp]ermitted*) ;; # A process of another user is alive too.
-    *) echo dead; return ;;
-  esac
-  now=$(proc_start "$pid")
-  if [ -n "$start" ] && [ -n "$now" ] && [ "$start" != "$now" ]; then echo dead; else echo alive; fi
-}
-
-# sweep: removes the session directories of other sessions that are over. A directory
-# stays while its owner runs. With a dead owner it goes 1 hour after its newest write,
-# and with no owner record 7 days after it.
+# sweep: deletes what ended runs left, in every session directory. A live wrapper writes
+# its file at least every 5 seconds, so a file with no write for a minute belongs to a run
+# that is over or paused. A paused run writes its whole file again when it continues.
+# -mmin +1 matches a file with no write for more than 60 s, with GNU and BSD find.
+# Never use +0: it matches a file that is 1 second old.
 sweep() {
-  local d minutes
-  for d in "$base"/*/; do
-    [ -d "$d" ] && [ "${d%/}" != "$dir" ] || continue
-    case $(owner_state "${d%/}") in
-      alive) continue ;;
-      dead) minutes=60 ;;
-      *) minutes=10080 ;;
-    esac
-    # The newest entry counts: a write changes a file, not its directory.
-    [ -z "$(find "$d" -mmin "-$minutes" -print 2>/dev/null | head -n 1)" ] && rm -rf "$d"
-  done
+  [ -d "$base" ] || return 0
+  find "$base" -mindepth 2 -maxdepth 2 -type f -mmin +1 -delete 2>/dev/null
+  find "$base" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null
 }
 
 # --- Arguments ---------------------------------------------------------------
@@ -266,7 +216,7 @@ tag() {
 # --- The run file --------------------------------------------------------------
 
 file=
-no_file=
+warned=
 last_write=0
 # The plugin reads run files 4 times a second, so more writes only slow COMMAND down.
 write_ms=200
@@ -282,16 +232,9 @@ now_ms() { # sets now to a clock in milliseconds, with no new process. Bash 3 co
   fi
 }
 
-open_file() { # creates the session directory and names the run file, at the first tag
-  [ -z "$file" ] && [ -z "$no_file" ] || return 0
+open_file() { # names the run file, at the first tag. A failed write creates the directory.
+  [ -z "$file" ] || return 0
   dir="$base/$session"
-  if [ ! -d "$dir" ]; then
-    if ! (umask 077 && mkdir -p "$dir") 2>/dev/null; then warn "cannot create $dir"; no_file=1; return 0; fi
-    if [ -n "${CLAUDE_PID-}" ]; then
-      printf '{"pid":%s,"procStart":"%s"}\n' "$CLAUDE_PID" "$(proc_start "$CLAUDE_PID")" > "$dir/.owner" 2>/dev/null
-    fi
-    sweep # A new session also removes what old sessions left.
-  fi
   file="$dir/$$-$(date +%s)"
 }
 
@@ -315,9 +258,12 @@ write_file() { # rewrites the whole run file from memory, with no new process
   done
   # The plugin uses a read only when it ends with this line, so a half-written file never counts.
   out+=end$'\n'
-  if ! printf '%s' "$out" 2>/dev/null > "$file"; then
-    [ -n "$no_file" ] || warn "cannot write $file"
-    no_file=1 file=
+  # A sweep can delete the directory of a new or paused run. So a failed write creates it
+  # and tries once more. A failure never stops later writes, but it warns only once.
+  if ! printf '%s' "$out" 2>/dev/null > "$file" \
+    && ! { (umask 077 && mkdir -p "$dir") 2>/dev/null && printf '%s' "$out" 2>/dev/null > "$file"; }; then
+    [ -n "$warned" ] || warn "cannot write $file"
+    warned=1
   fi
   last_write=$SECONDS
   dirty=
@@ -392,6 +338,8 @@ trap 'on_signal TERM 15' TERM
 trap 'on_signal HUP 1' HUP
 trap 'on_signal QUIT 3' QUIT
 trap on_exit EXIT
+# After the launch, so that COMMAND never waits for it.
+sweep
 
 status=
 last=

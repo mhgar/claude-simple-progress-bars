@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fake tasks that show each kind of bar, for about 75 seconds. Each task runs
 # through the claude-progress wrapper, and prints tag lines.
-# From about 39 s to 44 s, bars show running, stalled, failed, stopped, and done
+# From about 39 s to 47 s, bars show running, stalled, failed, stopped, and done
 # at the same time, while most tasks still run.
 # Run it in a Claude Code session with the plugin enabled: ! examples/demo.sh
 set -u
@@ -85,7 +85,7 @@ upload() {
   echo "[progress] fail server returned 503"
 }
 
-# Done: complete at about 39 s. A done bar stays 5 s.
+# Done: complete at about 39 s. A done bar stays 10 s.
 thumbnails() {
   local i
   for ((i = 1; i <= 120; i++)); do

@@ -6,7 +6,7 @@ import { rows } from './layout'
 import type { Target } from './layout'
 import { parseRun } from './parse'
 import { promptSection } from './prompt'
-import { hide, ingest, isRunName, settle } from './watch'
+import { hide, ingest, settle } from './watch'
 import type { Hidden, RunFile } from './watch'
 
 const board = atom({ plugin: 'simple-progress-bars', key: 'board' } as const, { bars: [], now: 0 } as Board)
@@ -38,7 +38,7 @@ type Watch = {
 /** Lists one session directory. Reads only the run files that changed since their last complete read. */
 async function readDir($: EngineInterface, w: Watch, dir: string): Promise<RunFile[]> {
   const entries = await $.fs.list(dir).catch(() => [])
-  const runs = entries.filter(e => e.kind === 'file' && isRunName(e.name))
+  const runs = entries.filter(e => e.kind === 'file')
   return Promise.all(runs.map(async (entry): Promise<RunFile> => {
     const file = `${dir}/${entry.name}`
     if (w.read.get(file) === entry.mtimeMs) return { file, mtimeMs: entry.mtimeMs, tasks: null }
