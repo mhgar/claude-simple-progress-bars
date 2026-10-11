@@ -23,6 +23,6 @@
 ## 5. Checks
 
 - [x] 5.1 Run `claude plugin test`, the type check, `claude plugin validate --strict`, `tests/cli-test.sh`, and `openspec validate long-step-estimates --strict`.
-- [ ] 5.2 Push to a branch, and get CI green on Linux, macOS, and Windows.
-- [ ] 5.3 Run the two new evals and the old evals with subtasks, at least once each.
-- [ ] 5.4 Archive the change into `openspec/specs`.
+- [x] 5.2 Push to a branch, and get CI green on Linux, macOS, and Windows. CI green on Linux, macOS, and Windows (run 38119490380).
+- [x] 5.3 Run the two new evals and the old evals with subtasks, at least once each. nested-batches, new-batch-script, and long-loop passed. parallel-workers failed its judge on a correct script, so the judge now accepts done with counts after failed items. It then passed 2 of 2.
+- [x] 5.4 Archive the change into `openspec/specs`.

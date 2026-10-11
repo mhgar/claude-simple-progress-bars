@@ -6,7 +6,7 @@ The plugin teaches Claude when and how to show progress. A short section in the 
 ## Requirements
 
 ### Requirement: Prompt section
-The plugin MUST add the section `simple-progress-bars:usage` at the end of the system prompt of each request. The section MUST tell Claude to run work that makes the person wait longer than about `minSeconds` seconds (default 2, from 1 to 3600) through the wrapper, as `bash "<plugin root>/scripts/claude-progress.sh" -n NAME COMMAND`, with the full path of the plugin's folder. It MUST tell Claude to do this without being asked, and also when Claude is not sure that a command is quick, for ad hoc loops, chains of commands, inline scripts, test runs, batches, transfers, background jobs, and jobs on a remote server. It MUST tell Claude to give each task and subtask a short name that a person reads, under 24 characters, and that names can hold spaces. It MUST give the tag forms `[progress] VALUE` and `[progress:NAME] VALUE` with the main values: a count, bytes, a percent, `+1`, `total N`, text, `done`, and `fail`. It MUST tell Claude that tags start a line, that a script flushes its output after each tag, and that a script ends each task with `done` or `fail`. It MUST tell Claude that a command that prints no tags shows no bar, and to print a text status tag around one step that it cannot measure. It MUST tell Claude to add tags to new script files that a person runs and waits for, and to ask before it adds tags to an existing script file, unless the user already asked for progress in that file. Until then, it MUST tell Claude to print tags from its own command around the script. It MUST tell Claude not to use the wrapper for quick commands, or in library or application code, services, test files, or CI. It MUST NOT name unattended jobs or code that shows its own progress as cases to skip. When the user asks to see progress, the section MUST tell Claude to use the wrapper for all work in that task, whatever its length, and still ask before it edits an existing script file. It MUST tell Claude to put the wrapper outside `nohup` and `&`, and to run a job that can take longer than the tool timeout in the background.
+The plugin MUST add the section `simple-progress-bars:usage` at the end of the system prompt of each request. The section MUST tell Claude to run work that makes the person wait longer than about `minSeconds` seconds (default 2, from 1 to 3600) through the wrapper, as `bash "<plugin root>/scripts/claude-progress.sh" -n NAME COMMAND`, with the full path of the plugin's folder. It MUST tell Claude to do this without being asked, and also when Claude is not sure that a command is quick, for ad hoc loops, chains of commands, inline scripts, test runs, batches, transfers, background jobs, and jobs on a remote server. It MUST tell Claude to give each task and subtask a short name that a person reads, under 24 characters, and that names can hold spaces. It MUST give the tag forms `[progress] VALUE` and `[progress:NAME] VALUE` with the main values: a count, bytes, a percent, `+1`, `total N`, text, `done`, and `fail`. It MUST tell Claude to use a subtask for each meaningful part of a task with its own count, such as an inner loop or a parallel worker, and to keep the overall count on the root. It MUST tell Claude that tags start a line, that a script flushes its output after each tag, and that a script ends each task with `done` or `fail`. It MUST tell Claude that a command that prints no tags shows no bar, and to print a text status tag around one step that it cannot measure. It MUST tell Claude to add tags to new script files that a person runs and waits for, and to ask before it adds tags to an existing script file, unless the user already asked for progress in that file. Until then, it MUST tell Claude to print tags from its own command around the script. It MUST tell Claude not to use the wrapper for quick commands, or in library or application code, services, test files, or CI. It MUST NOT name unattended jobs or code that shows its own progress as cases to skip. When the user asks to see progress, the section MUST tell Claude to use the wrapper for all work in that task, whatever its length, and still ask before it edits an existing script file. It MUST tell Claude to put the wrapper outside `nohup` and `&`, and to run a job that can take longer than the tool timeout in the background.
 
 #### Scenario: A custom threshold
 - **WHEN** the setting `minSeconds` is 90
@@ -24,16 +24,24 @@ The plugin MUST add the section `simple-progress-bars:usage` at the end of the s
 - **WHEN** the user says "show progress" for a task with a 10-second loop
 - **THEN** the section tells Claude to run that loop through the wrapper
 
+#### Scenario: Batches of items
+- **WHEN** Claude writes a script that renders 10 batches of 240 frames
+- **THEN** the section tells Claude to count batches on the root, and frames on a subtask
+
 #### Scenario: A remote job
 - **WHEN** Claude starts a long render on a remote server over SSH
 - **THEN** the section tells Claude to run the SSH command through the wrapper
 
 ### Requirement: Usage file
-The section MUST give the full path of `USAGE.md`, and tell Claude to read it before it writes a script file with tags, or when a bar does not act as Claude expects, and to tell a subagent that gets such work to read it too. `USAGE.md` MUST hold the full reference of the wrapper and the tags, root tasks and subtasks, how a bar behaves, what to do when a bar is wrong, one flush example for each common language, the rule for background jobs, and recipes for attached and detached remote jobs. The detached recipe MUST follow the log with `tail -n +1 -F`.
+The section MUST give the full path of `USAGE.md`, and tell Claude to read it before it writes a script file with tags, or when a bar does not act as Claude expects, and to tell a subagent that gets such work to read it too. `USAGE.md` MUST hold the full reference of the wrapper and the tags, root tasks and subtasks with an example of when to use each, how a bar behaves, what to do when a bar is wrong, one flush example for each common language, the rule for background jobs, and recipes for attached and detached remote jobs. The detached recipe MUST follow the log with `tail -n +1 -F`.
 
 #### Scenario: A Python script
 - **WHEN** Claude writes a long Python batch script
 - **THEN** the section has sent it to `USAGE.md`, which shows `print(..., flush=True)` for a tag
+
+#### Scenario: Parallel workers
+- **WHEN** Claude writes a script that runs 4 parallel workers over one list of files
+- **THEN** `USAGE.md` has shown it a subtask for each worker, and `total N` then `+1` on the root
 
 #### Scenario: A detached remote job
 - **WHEN** Claude follows the log of a detached job on a server

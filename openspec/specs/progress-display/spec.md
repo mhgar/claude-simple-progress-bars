@@ -27,22 +27,26 @@ A bar MUST show its name, the detail, the track, the count, the percent, the byt
 - **THEN** each row shows only its gutter, its name cut to 8 characters, and its track
 
 ### Requirement: Status
-The status MUST be `failed`, `stopped`, or `done` for an ended bar. A running bar MUST show `no update m:ss` after 30 seconds with no update, `finishing…` at its total, `estimating…` before 3 counted updates or 2 seconds, and `~m:ss left` after that. For a root, a report of any of its subtasks MUST count as an update.
+The status MUST be `failed`, `stopped`, or `done` for an ended bar. A running bar MUST show `finishing…` at its total, `estimating…` before 3 counted updates or 2 seconds, and `~m:ss left` after that. A running bar MUST NOT show a status for a time with no update.
 
 #### Scenario: A stall
-- **WHEN** a running bar gets no update for 31 seconds
-- **THEN** it shows `no update 0:31`
+- **WHEN** a running bar with steps of 1 second gets no update for 31 seconds, and 5 steps remain
+- **THEN** it shows `~m:ss left` with an estimate above 0, and no `no update` text
 
 #### Scenario: A quiet root with busy subtasks
 - **WHEN** a root gets no report of its own for 60 seconds, and its subtask `frames` gets a report every second
-- **THEN** the root does not show `no update`
+- **THEN** the root shows `~m:ss left` or `estimating…`, and no `no update` text
 
 ### Requirement: Colors
-A running bar MUST be cyan, a stalled one yellow, a done one green, and a failed or stopped one red. A running task with no total MUST show a segment that moves back and forth.
+A running bar MUST be cyan, a done one green, and a failed or stopped one red. A running bar MUST keep its color however long it gets no update. A running task with no total MUST show a segment that moves back and forth.
 
 #### Scenario: No total
 - **WHEN** a task runs with only text and no total
 - **THEN** a cyan segment moves back and forth across the track
+
+#### Scenario: A long step
+- **WHEN** a running bar gets no update for 10 minutes, and its wrapper writes the heartbeat
+- **THEN** the bar stays cyan
 
 ### Requirement: Subtask blocks
 A root with at least one subtask on show MUST get a block, also when it is collapsed. The root MUST have a row of its own. When it is expanded, each subtask MUST have a row of its own under it, in the order of their start times. Each subtask name MUST start 4 cells to the right of the root names, inside the name column. Subtask names MUST be dim. The block MUST have no empty rows. A root whose subtasks have all hidden MUST show as a normal bar.
@@ -83,7 +87,7 @@ The band MUST end with one line in these cases, and with none in other cases:
 - expanded, with more rows of bars than fit: `▴ show less · N more: COUNTS`,
 - compact, with more than 4 rows of bars: `▸ N more: COUNTS`.
 
-COUNTS MUST count the tasks that do not show, by state, in the order `running`, `stalled`, `failed`, `stopped`, `done`, and leave out states with a count of 0. A running task with no update for 30 seconds MUST count as `stalled`. The last line MUST count in the height of the band.
+COUNTS MUST count the tasks that do not show, by state, in the order `running`, `failed`, `stopped`, `done`, and leave out states with a count of 0. The last line MUST count in the height of the band.
 
 #### Scenario: Four rows or fewer
 - **WHEN** the bars need 3 rows, in either state
@@ -92,6 +96,10 @@ COUNTS MUST count the tasks that do not show, by state, in the order `running`, 
 #### Scenario: Too tall for the band
 - **WHEN** the band is expanded, has a height of 6, and the bars need 9 rows
 - **THEN** the band shows 5 rows of bars, and a last line that starts with `▴ show less · ` and counts the tasks that do not show
+
+#### Scenario: A quiet task in the counts
+- **WHEN** a task that does not show has had no update for 5 minutes, and its wrapper writes the heartbeat
+- **THEN** COUNTS counts it as `running`
 
 ### Requirement: Overflow
 The plugin MUST fill rows group by group, in start order, oldest first. A group MUST be a root with subtasks on show, or a run of roots with none. When a group does not fit whole, every later group MUST go to the last line, and no later group MUST move up to fill a gap. A run that does not fit whole MUST show the roots that fit. A root with subtasks whose row fits MUST keep its place, show the subtask rows that fit, and show `+N` on its row for the rest. A root with subtasks whose row does not fit MUST go to the last line with its subtasks.
