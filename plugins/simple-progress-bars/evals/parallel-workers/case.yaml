@@ -30,6 +30,6 @@ graders:
       1. The root shows the overall count of files: `total N` and then `+1` for each file, or a count against the total.
       2. Each worker shows its own progress on a subtask, such as `[progress:worker 2] FILE` or a count of its own files.
       3. The root ends with done when the work succeeds, or with fail when the run as a whole fails.
-      Each of these is fine, and is never a reason to FAIL: xargs -P, GNU parallel, or background jobs with wait; a subtask per worker or per file; worker subtasks that end with done, or none; a done message with or without counts.
+      Each of these is fine, and is never a reason to FAIL: xargs -P, GNU parallel, flock, or background jobs with wait; a subtask per worker or per file; worker subtasks that end with done, or none; done at the end, with or without a summary, after items failed and were skipped with a message; one fail at the end that sums up failed items; a non-zero exit status after a done tag when items failed; done right away when there is nothing to do.
       FAIL only when one of the three conditions is clearly broken.
       Reply with only the word PASS or the word FAIL. Do not explain.
