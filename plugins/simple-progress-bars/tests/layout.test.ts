@@ -155,6 +155,13 @@ describe('counts', () => {
 
     expect(counts(list)).toBe('2 running, 1 failed, 1 done')
   })
+
+  test('the last line counts a quiet task as running', () => {
+    const quiet = bar('q') // its only update was at 0
+    const out = rows([...'abcdef'.split('').map(n => bar(n)), quiet], 100, 300_000, view({ isCompact: true }))
+
+    expect(lines(out).at(-1)).toContain('3 more: 3 running')
+  })
 })
 
 describe('rows with subtasks', () => {
