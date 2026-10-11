@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Fake tasks that show each kind of bar, for about 75 seconds. Each task runs
 # through the claude-progress wrapper, and prints tag lines.
-# From about 39 s to 47 s, bars show running, stalled, failed, stopped, and done
-# at the same time, while most tasks still run.
+# From about 40 s to 47 s, bars show running, failed, stopped, and done at the same
+# time, and one estimate grows during a long step, while most tasks still run.
 # Run it in a Claude Code session with the plugin enabled: ! examples/demo.sh
 set -u
 WRAPPER=$(cd "$(dirname "$0")/.." && pwd)/plugins/simple-progress-bars/scripts/claude-progress.sh
@@ -65,14 +65,15 @@ scan() {
   echo "[progress] done"
 }
 
-# Stalled: no tag after about 8 s, so the bar shows "no update" from about 38 s.
-stalled() {
+# Long steps: 7 steps of 8 s, but the fifth takes 24 s. Its estimate grows from about 40 s to 56 s.
+longsteps() {
   local i
-  for ((i = 1; i <= 40; i++)); do
-    echo "[progress] $i/100"
-    sleep 0.2
+  echo "[progress] 0/7"
+  for ((i = 1; i <= 7; i++)); do
+    sleep $((i == 5 ? 24 : 8))
+    echo "[progress] $i/7 step $i"
   done
-  sleep 62
+  echo "[progress] done"
 }
 
 # Failed: a fail tag at about 37 s. A failed bar stays 10 s.
@@ -105,7 +106,7 @@ backup() {
 }
 
 task "Convert videos" convert & task "Download Ubuntu" download & task "Render shots" render &
-task "Scan library" scan & task "Stalled script" stalled & task "Upload photos" upload &
+task "Scan library" scan & task "Long steps" longsteps & task "Upload photos" upload &
 task Thumbnails thumbnails & task "Back up DB" backup &
 backup_pid=$!
 sleep 38

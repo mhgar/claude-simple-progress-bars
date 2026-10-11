@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { isExpired, revive, stale } from '../hooks/bar'
+import { isExpired, revive, stale, timeLeft } from '../hooks/bar'
 import { run, steady } from './fixtures'
 
 describe('apply', () => {
@@ -24,6 +24,12 @@ describe('apply', () => {
     const bar = run('job', [...steady(100, 3), ...repeats, [{ done: 3, total: 100 }, 3000]])
 
     expect(Math.round((bar.rate ?? 0) * 1000)).toBe(1) // 1 item a second, not 5
+  })
+
+  test('a long step weighs more', () => {
+    const bar = run('job', [...steady(100, 11), [{ done: 11, total: 100 }, 70_000]]) // 10 steps of 1 s, then one of 60 s
+
+    expect(bar.rate ?? 1).toBeLessThan(0.1 / 1000) // under 0.1 items a second
   })
 
   test('an unchanged update keeps the bar and its update time', () => {
@@ -54,6 +60,40 @@ describe('apply', () => {
     const bar = run('job', [[{ done: 1, total: 5 }, 0], [{ state: 'stopped', done: 1, total: 5, msg: 'interrupted' }, 1000]])
 
     expect(bar).toMatchObject({ state: 'stopped', label: 'interrupted', endedAt: 1000 })
+  })
+})
+
+describe('timeLeft', () => {
+  const MIN = 60_000
+  const tenMinuteSteps = run('job', steady(10, 6, 10 * MIN)) // 5 of 10 at 50 min, one item each 10 min
+
+  test('steps of 10 minutes count down', () => {
+    expect(Math.round((timeLeft(tenMinuteSteps, 54 * MIN) ?? 0) / MIN)).toBe(46)
+  })
+
+  test('a step that takes longer grows the time left', () => {
+    const at20 = timeLeft(tenMinuteSteps, 70 * MIN) ?? 0
+    const at30 = timeLeft(tenMinuteSteps, 80 * MIN) ?? 0
+
+    expect(at20).toBeGreaterThan(40 * MIN)
+    expect(at30).toBeGreaterThan(at20)
+  })
+
+  test('the countdown and the long step meet with no jump', () => {
+    const before = timeLeft(tenMinuteSteps, 60 * MIN) ?? 0
+    const after = timeLeft(tenMinuteSteps, 60 * MIN + 1000) ?? 0
+
+    expect(Math.abs(after - before)).toBeLessThan(0.01 * before)
+  })
+
+  test('a long last step leaves no time', () => {
+    const lastStep = run('job', steady(3, 3)) // 2 of 3 at 2 s
+
+    expect(timeLeft(lastStep, 10_000)).toBe(0)
+  })
+
+  test('there is no time left before the second step', () => {
+    expect(timeLeft(run('job', steady(10, 1)), 5000)).toBe(null)
   })
 })
 

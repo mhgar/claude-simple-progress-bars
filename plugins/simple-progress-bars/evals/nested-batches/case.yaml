@@ -1,0 +1,35 @@
+schema_version: "1.1"
+name: nested-batches
+description: A new script with an inner loop counts batches on the root and the items of each batch on a subtask.
+tags: [write, use, subtasks]
+execution:
+  max_turns: 10
+  timeout_seconds: 300
+  allowed_tools: [Write, Read, Glob]
+  prompt: |
+    Write a bash script render.sh in this folder. It renders 10 batches of 240 frames each. It renders one frame with ./render_frame BATCH FRAME, which takes about a second. Only write the file; do not run it.
+graders:
+  - name: prints-a-subtask
+    type: regex
+    target: { source: file, path: render.sh }
+    pattern: '\[progress:[^\]]+\] '
+  - name: counts-on-the-root
+    type: regex
+    target: { source: file, path: render.sh }
+    pattern: '\[progress\] (?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\d+)/(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\d+)'
+  - name: ends-with-done
+    type: regex
+    target: { source: file, path: render.sh }
+    pattern: '\[progress(?::[^\]]*)?\] (?:done|fail)\b'
+  - name: uses-subtasks-well
+    type: llm
+    focus: { source: file, path: render.sh }
+    criteria: |
+      A script shows progress by printing tag lines. `[progress] VALUE` updates the root task, and `[progress:NAME] VALUE` updates the subtask NAME of the root. VALUE can be a count such as `3/10`, `total N`, `+1`, text, `done`, or `fail`.
+      PASS when all of these hold:
+      1. The root shows the progress of the batches, as a count against 10 batches, or as a total of all frames.
+      2. A subtask shows the progress of the frames of the current batch, as a count against 240 or a percent.
+      3. The subtasks and the root end with done when the work succeeds, or the root ends with fail when the run as a whole fails.
+      Each of these is fine, and is never a reason to FAIL: one subtask name for all batches, or a new name for each batch; a subtask that ends with done after each batch, or none; a tag for every frame or every Nth frame; a 0/N tag at the start, or none.
+      FAIL only when one of the three conditions is clearly broken.
+      Reply with only the word PASS or the word FAIL. Do not explain.

@@ -30,16 +30,20 @@ export type Bar = {
   startedAt: number
   /** The file's modification time at the last update that changed the task. */
   updatedAt: number
-  /** The newest update of the task or, for a root, of any of its subtasks. */
-  activeAt: number
-  /** The last update that changed the count. The rate and the estimate count from it. */
+  /** The last step: the time when the progress last grew. The rate and the estimate count from it. */
   progressAt: number
+  /** The progress at the last step: the count, or for a root the count plus the done part of its one running subtask. */
+  progress: number
   /** When the bar left the run state, or null while it runs. */
   endedAt: number | null
-  /** The number of updates that changed the count. */
+  /** The number of steps, counting the first progress as one. */
   samples: number
-  /** The smoothed rate in units per ms, or null before two counted updates. */
+  /** The rate in units per ms, weighted by time, or null before the second step. */
   rate: number | null
+  /** The typical time of a step in ms, or null before the second step. */
+  stepTime: number | null
+  /** The typical progress of a step, or null before the second step. */
+  stepSize: number | null
   /** The shown time left at progressAt, in ms, or null while estimating. */
   eta: number | null
   /** The folded reports at the last update, so that an unchanged task is not updated again. */

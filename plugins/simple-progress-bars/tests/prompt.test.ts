@@ -36,6 +36,12 @@ describe('promptSection', () => {
     expect(text).toContain('`-n "Download Ubuntu"`')
   })
 
+  test('tells Claude to use subtasks for inner loops and parallel workers, and to keep the overall count on the root', () => {
+    const text = promptSection(30, ROOT, false)
+    expect(text).toContain('Use a subtask for each meaningful part with its own count, such as an inner loop or a parallel worker')
+    expect(text).toContain('Keep the overall count on the root.')
+  })
+
   test('asks for an end of each task', () => {
     expect(promptSection(30, ROOT, false)).toContain('End each task with `done` or `fail`.')
   })

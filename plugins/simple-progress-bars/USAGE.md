@@ -48,6 +48,20 @@ Numbers: up to 15 digits, optional `,` groups, up to 6 decimals. `N/0` and a per
 - An end of the root ends each running subtask with the same state.
 - An ended task is final. A later tag with the same name starts a new task with a new bar.
 
+Use a subtask for each meaningful part with its own count. Keep the overall count on the root.
+- Inner loop: the root counts batches, and a subtask counts the items of the current batch. The root's estimate then moves within each batch.
+  ```bash
+  echo "[progress] $b/10 batches"
+  echo "[progress:frames] $f/240"
+  ```
+- Parallel workers: the root counts all items with `total N` and `+1` from each worker. Each worker has its own subtask, with the item that it works on.
+  ```bash
+  echo "[progress] total 500"            # once, before the workers start
+  echo "[progress] +1"                   # from each worker, after each item
+  echo "[progress:worker 2] file_213.wav"
+  ```
+- A flat loop with one count needs no subtask.
+
 ## Ends
 - End each task with `done` or `fail`. Give true counts, such as `done 38 copied, 2 failed`. Use `fail` only when the whole task fails.
 - When COMMAND exits, each running task ends: `done` after exit status 0, else `fail exit N: LAST LINE`. A task that a tag ended keeps that end.
@@ -71,7 +85,9 @@ In a pipe, many languages hold output in a buffer, and tags then arrive late. Fl
 The wrapper sets `PYTHONUNBUFFERED=1` for COMMAND, so local Python works without a flush. The variable does not cross SSH.
 
 ## The bar
-- Status: `estimating…` until 3 counted updates or 2 s, then `~m:ss left`. `finishing…` at the total. `no update m:ss` (yellow) after 30 s with no tag. A subtask tag counts for its root.
+- Status: `estimating…` until 3 counted updates or 2 s, then `~m:ss left`. `finishing…` at the total. The estimate weights each step by its time, so long steps are fine. While a step takes longer than a typical step, the estimate grows. A last step that takes longer shows `finishing…`.
+- A root with a count in items, and exactly one running subtask with a total, adds the done part of that subtask to its estimate. The bar still shows the root count.
+- `running`: cyan, as long as the wrapper runs, however long a step takes.
 - `done`: green. `fail` and `stopped`: red. Each goes 10 s after it ends. This time does not depend on the wrapper or COMMAND.
 - Each task has its own row, and the rows form a table with aligned columns. A root with subtasks is marked `▾`, and its subtasks are on the rows under it. A press on the row collapses its subtasks into `+N` with counts by state, marked `▸`. The band shows every row, and ends with `▴ show less` past 4 rows. A press on it keeps 4 rows and a `▸ N more: …` line. To press, click in fullscreen mode, or press `ctrl+x`, then `Tab`, then Enter on the row.
 - A running bar stays while its wrapper runs, however long a step takes. If the wrapper stops without a chance to write, as after `KILL`, the bar shows `stopped` after 10 s.
@@ -99,7 +115,7 @@ claude-progress -n render ssh -q HOST 'tail -n +1 -F render.log'
 - No bar: the command printed no tag, the run is outside Claude Code (no `CLAUDE_CODE_SESSION_ID`), the tag is not at the start of a line, or the output sits in a buffer. Check with `--dir`, and list the files in it that start with `$CLAUDE_CODE_SESSION_ID.`.
 - Tags show in the output: the wrapper is not around the command, or the run is outside Claude Code.
 - `stopped` while the job runs: the wrapper was killed, or the job is outside the wrapper.
-- `no update`: no tag for 30 s. Print tags more often, or a text status.
+- An estimate that keeps growing: the current step takes much longer than the steps before it. Check whether the job is stuck.
 
 ## How it works
 The plugin has two parts: the wrapper, and a set of hooks inside Claude Code.

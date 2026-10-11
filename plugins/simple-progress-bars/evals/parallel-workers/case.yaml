@@ -1,0 +1,35 @@
+schema_version: "1.1"
+name: parallel-workers
+description: A new script with parallel workers keeps the overall count on the root and gives each worker a subtask.
+tags: [write, use, subtasks]
+execution:
+  max_turns: 10
+  timeout_seconds: 300
+  allowed_tools: [Write, Read, Glob]
+  prompt: |
+    Write a bash script convert.sh in this folder. It takes a folder as its argument and converts every .wav file in it to .mp3 with ffmpeg, with 4 parallel workers. The folders often hold thousands of files. Only write the file; do not run it.
+graders:
+  - name: prints-a-subtask
+    type: regex
+    target: { source: file, path: convert.sh }
+    pattern: '\[progress:[^\]]+\] '
+  - name: counts-on-the-root
+    type: regex
+    target: { source: file, path: convert.sh }
+    pattern: '\[progress\] (?:total |\+1\b|(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\d+)/(?:\$\{?\w+\}?|\$\(\([^)]*\)\)|\d+))'
+  - name: ends-with-done
+    type: regex
+    target: { source: file, path: convert.sh }
+    pattern: '\[progress(?::[^\]]*)?\] (?:done|fail)\b'
+  - name: uses-subtasks-well
+    type: llm
+    focus: { source: file, path: convert.sh }
+    criteria: |
+      A script shows progress by printing tag lines. `[progress] VALUE` updates the root task, and `[progress:NAME] VALUE` updates the subtask NAME of the root. VALUE can be a count such as `3/10`, `total N`, `+1`, text, `done`, or `fail`. Tags from parallel workers can go to one output.
+      PASS when all of these hold:
+      1. The root shows the overall count of files: `total N` and then `+1` for each file, or a count against the total.
+      2. Each worker shows its own progress on a subtask, such as `[progress:worker 2] FILE` or a count of its own files.
+      3. The root ends with done when the work succeeds, or with fail when the run as a whole fails.
+      Each of these is fine, and is never a reason to FAIL: xargs -P, GNU parallel, or background jobs with wait; a subtask per worker or per file; worker subtasks that end with done, or none; a done message with or without counts.
+      FAIL only when one of the three conditions is clearly broken.
+      Reply with only the word PASS or the word FAIL. Do not explain.

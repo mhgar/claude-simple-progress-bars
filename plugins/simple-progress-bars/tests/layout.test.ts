@@ -36,10 +36,10 @@ describe('layout', () => {
     expect(text(layout(bar, 140, 2000))).toContain('2.0G/4.0G  50%  1.0G/s')
   })
 
-  test('counts the estimate down between updates', () => {
-    const bar = run('job', steady(100, 3))
+  test('counts the estimate down within a typical step', () => {
+    const bar = run('job', steady(100, 3, 10_000)) // 2 of 100 at 20 s, one item each 10 s
 
-    expect(text(layout(bar, 120, 12_000))).toContain('~1:28 left')
+    expect(text(layout(bar, 120, 25_000))).toContain('~16:15 left')
   })
 
   test('shows estimating before 3 counted updates', () => {
@@ -48,10 +48,21 @@ describe('layout', () => {
     expect(text(layout(bar, 120, 1000))).toContain('estimating…')
   })
 
-  test('shows no update after 30 s of silence', () => {
-    const bar = run('job', [[{ done: 1, total: 10 }, 0]])
+  test('a long step keeps an estimate above 0 and the running color', () => {
+    const bar = run('job', steady(10, 3)) // 2 of 10 at 2 s, one item a second
 
-    expect(text(layout(bar, 100, 31_000))).toContain('no update 0:31')
+    const pieces = layout(bar, 120, 33_000)
+
+    expect(text(pieces)).toMatch(/~\d+:\d\d left/)
+    expect(text(pieces)).not.toContain('~0:00')
+    expect(text(pieces)).not.toContain('no update')
+    expect(pieces.some(p => 'color' in p && p.color === 'yellow')).toBe(false)
+  })
+
+  test('a long last step shows finishing', () => {
+    const bar = run('job', steady(3, 3)) // 2 of 3 at 2 s, one item a second
+
+    expect(text(layout(bar, 100, 10_000))).toContain('finishing…')
   })
 
   test('shows finishing at the total while the script runs', () => {
@@ -142,11 +153,7 @@ describe('counts', () => {
   test('counts by state in a fixed order, and leaves out states with no bar', () => {
     const list = [bar('d', { state: 'done' }), bar('r'), bar('f', { state: 'fail' }), bar('r2')]
 
-    expect(counts(list, 0)).toBe('2 running, 1 failed, 1 done')
-  })
-
-  test('counts a running bar with no update for 30 s as stalled', () => {
-    expect(counts([bar('s')], 31_000)).toBe('1 stalled')
+    expect(counts(list)).toBe('2 running, 1 failed, 1 done')
   })
 })
 
@@ -197,10 +204,8 @@ describe('rows with subtasks', () => {
     expect(out.map(r => r.target)).toEqual([undefined, undefined])
   })
 
-  test('a quiet root with a busy subtask is not stalled', () => {
-    const busy = { ...root, activeAt: 59_000 }
-
-    expect(text(layout(busy, 100, 60_000))).not.toContain('no update')
+  test('a quiet root shows no stall text', () => {
+    expect(text(layout(root, 100, 60_000))).not.toContain('no update')
   })
 })
 

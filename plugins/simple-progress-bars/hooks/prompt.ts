@@ -17,6 +17,7 @@ export function promptSection(minSeconds: number, root: string, hasPowerShell: b
     '- `done ["38 copied, 2 failed"]`: success, with true counts',
     '- `fail "message"`: the task failed',
     'End each task with `done` or `fail`. When the command exits, the wrapper ends what is left, by the exit status.',
+    'Use a subtask for each meaningful part with its own count, such as an inner loop or a parallel worker: `[progress] 3/10 batches`, then `[progress:frames] 120/240` for the current batch. Keep the overall count on the root.',
     `A command that prints no tags shows no bar. For one step that you cannot measure, print a status first: \`-n build bash -c 'echo "[progress] Building"; ./build.sh'\`.`,
     '- New script files that a person runs and waits for: print tags. Existing script files: ask before you add tags, unless the user asked for progress in that file. Until then, print the tags from your own command around the script: a status, or a count from its output or its files.',
     '- Not for quick commands, or library or application code, services, test files, or CI. When the user asks to see progress, use it for all work, however short.',

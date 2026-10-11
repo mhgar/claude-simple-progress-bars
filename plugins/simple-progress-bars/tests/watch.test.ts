@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { Bar } from '../types'
 import { parseRun } from '../hooks/parse'
-import { hide, ingest, isSessionFile, settle } from '../hooks/watch'
+import { hide, ingest, isSessionFile, progressOf, settle } from '../hooks/watch'
 import type { Hidden, RunFile } from '../hooks/watch'
 
 const F = '/s/100-1700000000'
@@ -78,6 +78,50 @@ describe('isSessionFile', () => {
   }
 })
 
+describe('subtask progress', () => {
+  const root = (count: string, ...rest: string[]) => ['task 1 - r', `[1] ${count}`, ...rest]
+  const rootOf = (bars: Bar[]) => bars.find(b => b.name === 'r') as Bar
+
+  test('a root with one running subtask follows its fraction', () => {
+    const bars = ingest(new Map(), [runFile(5, ...root('2/10', 'task 2 1 frames', '[2] 144/240'))], new Map())
+
+    expect(Math.round(progressOf(rootOf(bars), bars) * 10) / 10).toBe(2.6)
+  })
+
+  test('a root with two running subtasks uses its own count', () => {
+    const bars = ingest(new Map(), [runFile(5, ...root('2/10', 'task 2 1 a', '[2] 1/4', 'task 3 1 b', '[3] 3/4'))], new Map())
+
+    expect(progressOf(rootOf(bars), bars)).toBe(2)
+  })
+
+  test('a root in bytes uses its own count', () => {
+    const bars = ingest(new Map(), [runFile(5, ...root('1G/4G', 'task 2 1 a', '[2] 1/2'))], new Map())
+
+    expect(progressOf(rootOf(bars), bars)).toBe(1024 ** 3)
+  })
+
+  test('subtask progress moves the root estimate, and a subtask that ends first does not restart it', () => {
+    const files = [
+      root('2/10', 'task 2 1 frames', '[2] 0/4'),
+      root('2/10', 'task 2 1 frames', '[2] 2/4'),
+      root('2/10', 'task 2 1 frames', '[2] 4/4'),
+      root('2/10', 'task 2 1 frames', '[2] done'),
+      root('3/10', 'task 2 1 frames', '[2] done', 'task 3 1 frames', '[3] 0/4'),
+    ]
+    let prev = new Map<string, Bar>()
+    const seen: Bar[] = []
+
+    for (const [i, lines] of files.entries()) {
+      const bars = ingest(prev, [runFile(i * 1000, ...lines)], new Map())
+      prev = byKey(bars)
+      seen.push(rootOf(bars))
+    }
+
+    expect(seen.map(b => b.samples)).toEqual([1, 2, 3, 3, 3])
+    expect(seen[4]?.rate).not.toBe(null)
+  })
+})
+
 describe('settle', () => {
   const bars = (at: number) => ingest(new Map(), [runFile(at, 'task 1 - r', '[1] 1/3')], new Map())
 
@@ -94,20 +138,13 @@ describe('settle', () => {
 
     const { bars: kept, expired } = settle(beat, mtimes(3_600_000), 3_600_100)
 
-    expect([kept[0]?.state, kept[0]?.activeAt, expired.length]).toEqual(['run', 0, 0])
+    expect([kept[0]?.state, expired.length]).toEqual(['run', 0])
   })
 
   test('a stale bar runs again when its file changes', () => {
     const stopped = settle(bars(0), mtimes(0), 10_001).bars
 
     expect(settle(stopped, mtimes(20_000), 20_100).bars[0]?.state).toBe('run')
-  })
-
-  test('a subtask report keeps its root active', () => {
-    const root = ingest(new Map(), [runFile(0, 'task 1 - r', 'task 2 1 a')], new Map())
-    const later = ingest(byKey(root), [runFile(9000, 'task 1 - r', 'task 2 1 a', '[2] 1/5')], new Map())
-
-    expect(settle(later, mtimes(9000), 9100).bars.find(b => b.name === 'r')?.activeAt).toBe(9000)
   })
 
   test('splits off a complete bar after its hold, and hides it for good', () => {

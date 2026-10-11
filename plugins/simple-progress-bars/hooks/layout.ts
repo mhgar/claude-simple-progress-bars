@@ -1,5 +1,5 @@
 import type { Bar } from '../types'
-import { STALL_MS } from './bar'
+import { timeLeft } from './bar'
 
 const NAME_MAX = 20
 const LABEL_MAX = 24
@@ -70,7 +70,7 @@ function fraction(bar: Bar): number {
   return bar.total === null ? 0 : Math.min(1, bar.done / bar.total)
 }
 
-function colorOf(bar: Bar, isStalled: boolean): string {
+function colorOf(bar: Bar): string {
   switch (bar.state) {
     case 'fail':
     case 'stopped':
@@ -78,11 +78,11 @@ function colorOf(bar: Bar, isStalled: boolean): string {
     case 'complete':
       return 'green'
     case 'run':
-      return isStalled ? 'yellow' : 'cyan'
+      return 'cyan'
   }
 }
 
-function statusOf(bar: Bar, now: number, isStalled: boolean): string {
+function statusOf(bar: Bar, now: number): string {
   switch (bar.state) {
     case 'fail':
       return 'failed'
@@ -91,18 +91,23 @@ function statusOf(bar: Bar, now: number, isStalled: boolean): string {
     case 'complete':
       return 'done'
     case 'run':
-      if (isStalled) return `no update ${duration(now - bar.activeAt)}`
-      if (bar.total === null) return ''
-      if (bar.done >= bar.total) return 'finishing…'
-      if (bar.eta === null || bar.samples < 3 || now - bar.startedAt < 2000) return 'estimating…'
-      return `~${duration(bar.eta - (now - bar.progressAt))} left`
+      return runningStatus(bar, now)
   }
+}
+
+function runningStatus(bar: Bar, now: number): string {
+  if (bar.total === null) return ''
+  if (bar.done >= bar.total) return 'finishing…'
+  const left = timeLeft(bar, now)
+  if (left === null || bar.samples < 3 || now - bar.startedAt < 2000) return 'estimating…'
+  // 0: the last step runs longer than a typical step.
+  return left > 0 ? `~${duration(left)} left` : 'finishing…'
 }
 
 /** The texts of one bar, before the layout fits them to a width. */
 type Parts = { name: string; label: string; count: string; pct: string; rate: string; elapsed: string; status: string }
 
-function partsOf(bar: Bar, w: number, now: number, isStalled: boolean): Parts {
+function partsOf(bar: Bar, w: number, now: number): Parts {
   const hasCount = bar.unit !== '%' && (bar.total !== null || bar.done > 0)
   return {
     name: truncate(bar.name, Math.min(NAME_MAX, Math.max(4, Math.floor(w / 5)))),
@@ -112,7 +117,7 @@ function partsOf(bar: Bar, w: number, now: number, isStalled: boolean): Parts {
     pct: bar.total === null ? '' : `${Math.floor(fraction(bar) * 100 + 1e-9)}%`,
     rate: bar.unit === 'B' && bar.state === 'run' && bar.rate !== null ? `${bytes(bar.rate * 1000)}/s` : '',
     elapsed: duration((bar.endedAt ?? now) - bar.startedAt),
-    status: statusOf(bar, now, isStalled),
+    status: statusOf(bar, now),
   }
 }
 
@@ -162,10 +167,8 @@ function fit(bar: Bar, parts: Parts, w: number, now: number, color: string, isQu
 
 /** Lays one bar out in exactly `w` cells. A subtask has a dim name. */
 export function layout(bar: Bar, w: number, now: number, isSub = false): Piece[] {
-  const isStalled = bar.state === 'run' && now - bar.activeAt > STALL_MS
-  const isQuiet = bar.state === 'run' && !isStalled
-  const color = colorOf(bar, isStalled)
-  return fit(bar, partsOf(bar, w, now, isStalled), w, now, color, isQuiet, isSub).filter(p => p.text !== '')
+  const isQuiet = bar.state === 'run'
+  return fit(bar, partsOf(bar, w, now), w, now, colorOf(bar), isQuiet, isSub).filter(p => p.text !== '')
 }
 
 /** What the person chose: the roots they collapsed, and the state of the band. `height` is the band's height in rows. */
@@ -180,11 +183,11 @@ export type Row = { pieces: Piece[]; target?: Target }
 const COMPACT_ROWS = 4
 const MARK_OPEN = '▾ '
 const MARK_SHUT = '▸ '
-const COUNT_ORDER = ['running', 'stalled', 'failed', 'stopped', 'done'] as const
+const COUNT_ORDER = ['running', 'failed', 'stopped', 'done'] as const
 
 type Word = (typeof COUNT_ORDER)[number]
 
-function wordOf(bar: Bar, now: number): Word {
+function wordOf(bar: Bar): Word {
   switch (bar.state) {
     case 'complete':
       return 'done'
@@ -193,14 +196,14 @@ function wordOf(bar: Bar, now: number): Word {
     case 'stopped':
       return 'stopped'
     case 'run':
-      return now - bar.activeAt > STALL_MS ? 'stalled' : 'running'
+      return 'running'
   }
 }
 
 /** Counts bars by state: "2 running, 1 failed". States with no bar are left out. */
-export function counts(bars: readonly Bar[], now: number): string {
+export function counts(bars: readonly Bar[]): string {
   const n = new Map<Word, number>()
-  for (const b of bars) n.set(wordOf(b, now), (n.get(wordOf(b, now)) ?? 0) + 1)
+  for (const b of bars) n.set(wordOf(b), (n.get(wordOf(b)) ?? 0) + 1)
   return COUNT_ORDER.filter(w => n.has(w)).map(w => `${n.get(w)} ${w}`).join(', ')
 }
 
@@ -221,12 +224,11 @@ const NARROW_STEPS = ['counts', 'label', 'rate', 'count', 'elapsed', 'name', 'pc
 type Texts = { name: string; label: string; count: string; pct: string; rate: string; elapsed: string; status: string; more: string; full: string }
 
 function textsOf(line: Line, now: number): Texts {
-  const isStalled = line.bar.state === 'run' && now - line.bar.activeAt > STALL_MS
-  const p = partsOf(line.bar, Number.MAX_SAFE_INTEGER, now, isStalled)
+  const p = partsOf(line.bar, Number.MAX_SAFE_INTEGER, now)
   const more = line.hidden.length > 0 ? `+${line.hidden.length}` : ''
   return {
     name: line.bar.name, label: line.bar.label, count: p.count, pct: p.pct, rate: p.rate, elapsed: p.elapsed, status: p.status,
-    more, full: more ? `${more}: ${counts(line.hidden, now)}` : '',
+    more, full: more ? `${more}: ${counts(line.hidden)}` : '',
   }
 }
 
@@ -273,9 +275,8 @@ function table(lines: readonly Line[], w: number, now: number): Piece[][] {
   return lines.map((line, i) => {
     const t = texts[i] as Texts
     const bar = line.bar
-    const isStalled = bar.state === 'run' && now - bar.activeAt > STALL_MS
-    const isQuiet = bar.state === 'run' && !isStalled
-    const color = colorOf(bar, isStalled)
+    const isQuiet = bar.state === 'run'
+    const color = colorOf(bar)
     const numberStyle = isQuiet ? { dim: true } : { color }
     const out: Piece[] = [{ text: line.mark, dim: true }]
     out.push(line.isSub
@@ -364,7 +365,7 @@ export function rows(bars: readonly Bar[], w: number, now: number, view: View): 
   }))
   if (fitsWhole) return out
 
-  const more = unseen.length > 0 ? `${unseen.length} more: ${counts(unseen, now)}` : ''
+  const more = unseen.length > 0 ? `${unseen.length} more: ${counts(unseen)}` : ''
   const line = view.isCompact ? `▸ ${more}` : more ? `▴ show less · ${more}` : '▴ show less'
   out.push({ pieces: [{ text: truncate(line, w), dim: true }], target: { band: true } })
   return out
