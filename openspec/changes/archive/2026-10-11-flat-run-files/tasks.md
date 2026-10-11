@@ -16,7 +16,7 @@
 
 ## 4. Checks
 
-- [ ] 4.1 Run `tests/cli-test.sh` on Linux with PowerShell. Get the macOS and Windows CI jobs green.
+- [x] 4.1 Run `tests/cli-test.sh` on Linux with PowerShell. Get the macOS and Windows CI jobs green. Linux: 72 passed, with PowerShell 7.6.6. CI green on Linux, macOS, and Windows (run 38114387231).
 - [x] 4.2 Run `claude plugin test`, the type check, `claude plugin validate --strict`, and `openspec validate flat-run-files --strict`.
 - [x] 4.3 Hands-on: run the new wrapper in this session, and check that it writes a flat file and leaves the old session directory alone.
 - [x] 4.4 Archive the change into `openspec/specs`.

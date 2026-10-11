@@ -6,15 +6,23 @@ The plugin reads the run files, folds the reports of each task into its state, e
 ## Requirements
 
 ### Requirement: Watched directories
-The plugin MUST read `<config>/progress/<session id>` every 250 ms, with `<config>` from `CLAUDE_CONFIG_DIR`, else `HOME`, else `USERPROFILE`, and `/.claude` after the last two. It MUST read a file again only when its modification time changes. It MUST NOT write or delete any file. After `/clear` or `/resume`, it MUST add the directory of the new session ID and keep the earlier ones.
+The plugin MUST list `<config>/progress` every 250 ms, with `<config>` from `CLAUDE_CONFIG_DIR`, else `HOME`, else `USERPROFILE`, and `/.claude` after the last two. It MUST read only the files whose names start with one of its session IDs and `.`. It MUST read a file again only when its modification time changes. It MUST NOT write or delete any file. After `/clear` or `/resume`, it MUST add the new session ID and keep the earlier ones.
 
 #### Scenario: Clear
-- **WHEN** a background wrapper writes to the old session directory, and the user runs `/clear`
+- **WHEN** a background wrapper writes a run file with the old session ID, and the user runs `/clear`
 - **THEN** the bars of that wrapper stay
 
 #### Scenario: A file of an earlier version
-- **WHEN** a session directory holds a `.owner` file
-- **THEN** the plugin shows no bar for it
+- **WHEN** `<config>/progress` holds a session directory of version 1.2.4, with a `.owner` file or run files
+- **THEN** the plugin reads none of them, and shows no bar for them
+
+#### Scenario: A file of another session
+- **WHEN** `<config>/progress` holds a run file of another session
+- **THEN** the plugin does not read it, and shows no bar for it
+
+#### Scenario: A session ID that starts another
+- **WHEN** the session ID is `abc`, and `<config>/progress` holds `abc-2.4242-1700000000`
+- **THEN** the plugin does not read that file
 
 ### Requirement: Line folding
 The plugin MUST apply the reports of a task in order. `N/M` and `N%` set the count, the total, and the detail. `+N` adds to the count, and its rest, when given, sets the detail. `total T` sets the total. `done` ends the task and fills the count to the total. `fail` ends the task with its message. `stopped` ends the task as stopped with its message. `clear` removes the task. Any other report sets the detail, and keeps the count and the total. A task MUST NOT change after its end.
