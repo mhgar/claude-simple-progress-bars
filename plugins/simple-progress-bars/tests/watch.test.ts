@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { Bar } from '../types'
 import { parseRun } from '../hooks/parse'
-import { hide, ingest, settle } from '../hooks/watch'
+import { hide, ingest, isSessionFile, settle } from '../hooks/watch'
 import type { Hidden, RunFile } from '../hooks/watch'
 
 const F = '/s/100-1700000000'
@@ -59,6 +59,23 @@ describe('ingest', () => {
 
     expect(ingest(new Map(), [owner], new Map())).toEqual([])
   })
+})
+
+describe('isSessionFile', () => {
+  const ids = new Set(['abc', 'def'])
+  const cases = [
+    ['a name with the session ID and a dot belongs', 'abc.4242-1700000000', true],
+    ['a name of an earlier session ID belongs', 'def.1-1700000000', true],
+    ['a name of another session does not belong', 'xyz.4242-1700000000', false],
+    ['a session ID that starts another ID does not match', 'abc-2.4242-1700000000', false],
+    ['a name with no dot does not belong', 'abc', false],
+    ['a dot file does not belong', '.owner', false],
+  ] as const
+  for (const [name, file, expected] of cases) {
+    test(name, () => {
+      expect(isSessionFile(file, ids)).toBe(expected)
+    })
+  }
 })
 
 describe('settle', () => {

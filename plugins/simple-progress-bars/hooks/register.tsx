@@ -6,7 +6,7 @@ import { rows } from './layout'
 import type { Target } from './layout'
 import { parseRun } from './parse'
 import { promptSection } from './prompt'
-import { hide, ingest, settle } from './watch'
+import { hide, ingest, isSessionFile, settle } from './watch'
 import type { Hidden, RunFile } from './watch'
 
 const board = atom({ plugin: 'simple-progress-bars', key: 'board' } as const, { bars: [], now: 0 } as Board)
@@ -25,8 +25,8 @@ const barWidth = (columns: number) => Math.max(20, columns - INDENT - 1)
 type Watch = {
   /** `<config dir>/progress`, the same directory that the command writes to. */
   base: string | null
-  /** The session directories of this process, newest last. Older ones keep their background tasks. */
-  dirs: string[]
+  /** The session IDs of this process. Older ones keep their background tasks. */
+  ids: Set<string>
   /** The modification time of each run file at its last complete read. */
   read: Map<string, number>
   /** Expired tasks, by key. */
@@ -35,12 +35,12 @@ type Watch = {
   ticks: number
 }
 
-/** Lists one session directory. Reads only the run files that changed since their last complete read. */
-async function readDir($: EngineInterface, w: Watch, dir: string): Promise<RunFile[]> {
-  const entries = await $.fs.list(dir).catch(() => [])
-  const runs = entries.filter(e => e.kind === 'file')
+/** Lists the progress directory. Reads only the run files of this process's sessions that changed since their last complete read. */
+async function readRuns($: EngineInterface, w: Watch, base: string): Promise<RunFile[]> {
+  const entries = await $.fs.list(base).catch(() => [])
+  const runs = entries.filter(e => e.kind === 'file' && isSessionFile(e.name, w.ids))
   return Promise.all(runs.map(async (entry): Promise<RunFile> => {
-    const file = `${dir}/${entry.name}`
+    const file = `${base}/${entry.name}`
     if (w.read.get(file) === entry.mtimeMs) return { file, mtimeMs: entry.mtimeMs, tasks: null }
     const tasks = parseRun(await $.fs.read(file).catch(() => ''))
     // A half-written file is read again at the next tick, even with the same time.
@@ -54,14 +54,11 @@ async function tick($: EngineInterface, w: Watch) {
   w.isBusy = true
   try {
     w.ticks += 1
-    if (w.ticks % ID_CHECK_TICKS === 0) {
-      const dir = `${w.base}/${await $.session.id()}`
-      if (!w.dirs.includes(dir)) w.dirs.push(dir)
-    }
+    if (w.ticks % ID_CHECK_TICKS === 0) w.ids.add(await $.session.id())
 
     const [now, prev] = await Promise.all([$.clock.now(), read($, board)])
     const byKey = new Map(prev.bars.map(b => [b.key, b]))
-    const files = (await Promise.all(w.dirs.map(d => readDir($, w, d)))).flat()
+    const files = await readRuns($, w, w.base)
     const mtimes = new Map(files.map(f => [f.file, f.mtimeMs]))
     for (const file of w.read.keys()) if (!mtimes.has(file)) w.read.delete(file)
     for (const key of w.hidden.keys()) if (!mtimes.has(key.slice(0, key.lastIndexOf('#')))) w.hidden.delete(key)
@@ -86,7 +83,7 @@ async function start($: EngineInterface, w: Watch) {
   const config = configDir || (home || profile ? `${home || profile}/.claude` : null)
   if (config !== null) {
     w.base = `${config}/progress`
-    w.dirs = [`${w.base}/${id}`]
+    w.ids = new Set([id])
     $.clock.every(TICK_MS, () => void tick($, w))
   }
 }
@@ -94,7 +91,7 @@ async function start($: EngineInterface, w: Watch) {
 export const register: Register = (on, options) => {
   const minSeconds = typeof options.minSeconds === 'number' ? Math.max(1, options.minSeconds) : 2
   const w: Watch = {
-    base: null, dirs: [], read: new Map(), hidden: new Map(), isBusy: false, ticks: 0,
+    base: null, ids: new Set(), read: new Map(), hidden: new Map(), isBusy: false, ticks: 0,
   }
 
   on('session.start', async ($, e, next) => {

@@ -2,7 +2,7 @@ import type { Bar } from '../types'
 import { apply, isExpired, revive, STALE_MS, stale } from './bar'
 import type { RunTask } from './parse'
 
-/** One run file as one read of a session directory finds it. */
+/** One run file as one read of the progress directory finds it. */
 export type RunFile = {
   file: string
   mtimeMs: number
@@ -10,7 +10,16 @@ export type RunFile = {
   tasks: RunTask[] | null
 }
 
-/** The key of one task: unique across the watched session directories. */
+/**
+ * Returns true for a run file of one of the sessions in `ids`: `<session id>.<pid>-<start>`.
+ * A session ID holds no `.`, so the first `.` ends it.
+ */
+export function isSessionFile(name: string, ids: ReadonlySet<string>): boolean {
+  const dot = name.indexOf('.')
+  return dot > 0 && ids.has(name.slice(0, dot))
+}
+
+/** The key of one task: unique across the watched sessions. */
 export const taskKey = (file: string, id: number) => `${file}#${id}`
 
 /**

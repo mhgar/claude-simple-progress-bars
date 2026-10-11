@@ -2,8 +2,8 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 const PLUGIN = 'simple-progress-bars'
-const DIR = '/home/u/.claude/progress/s1'
-const RUN = '4242-1700000000'
+const DIR = '/home/u/.claude/progress'
+const RUN = 's1.4242-1700000000'
 const CONVERT = 'task 1 - convert\n[1] 17/240 clip.mkv\nend\n'
 // On Windows the engine hands the fs hooks a native path: C:\home\u\... for /home/u/...
 const posix = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
@@ -67,6 +67,15 @@ describe('the band above the prompt', () => {
     expect(await ui.findAll({ type: 'Text' })).toEqual([])
   })
 
+  test('draws nothing for a run file of another session', async ($, on) => {
+    const clock = world(on, { 's2.4242-1700000000': CONVERT })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await clock.advance(300)
+
+    const ui = await $.ui.mount(band())
+    expect(await ui.findAll({ type: 'Text' })).toEqual([])
+  })
+
   test('draws nothing with no task', async ($, on) => {
     const clock = world(on, {})
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -116,7 +125,7 @@ describe('presses in the band', () => {
 
   test('a press on the last line makes the band compact, and a second press expands it', async ($, on) => {
     // Nine roots, one to a row: nine rows of bars, and the band is 10 rows high.
-    const files = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`${100 + i}-1700000000`, `task 1 - job${i}\n[1] 1/2\nend\n`]))
+    const files = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`s1.${100 + i}-1700000000`, `task 1 - job${i}\n[1] 1/2\nend\n`]))
     const clock = world(on, files)
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await clock.advance(300)

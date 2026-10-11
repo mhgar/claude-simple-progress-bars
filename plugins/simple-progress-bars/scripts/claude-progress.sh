@@ -3,7 +3,7 @@
 #
 # The wrapper reads the output of COMMAND. A line that starts with [progress] or
 # [progress:NAME] updates a task and never reaches the output. The wrapper holds the
-# tasks in memory, and rewrites one run file, <dir>/<session id>/<pid>-<start>, after
+# tasks in memory, and rewrites one run file, <dir>/<session id>.<pid>-<start>, after
 # a tag, at most every 0.2 seconds, and at least every 5 seconds. The plugin reads that
 # file. The plugin gives Claude this file's path:
 #   bash "<plugin>/scripts/claude-progress.sh" -n render ./render.sh
@@ -40,23 +40,22 @@ Options:
   -h, --help  show this reference
 
 Outside a Claude Code session, the wrapper runs COMMAND and changes nothing.
-Files: <dir>/<session id>/<pid>-<start>, where <dir> is $CLAUDE_CONFIG_DIR/progress,
+Files: <dir>/<session id>.<pid>-<start>, where <dir> is $CLAUDE_CONFIG_DIR/progress,
 or ~/.claude/progress. At each start in a session, the wrapper deletes the files
-in <dir> with no write for 1 to 2 minutes, and the empty session directories.
+in <dir> with no write for 1 to 2 minutes.
 EOF
 }
 
 warn() { printf 'claude-progress: %s\n' "$1" >&2; }
 
-# sweep: deletes what ended runs left, in every session directory. A live wrapper writes
+# sweep: deletes what ended runs of every session left. A live wrapper writes
 # its file at least every 5 seconds, so a file with no write for a minute belongs to a run
 # that is over or paused. A paused run writes its whole file again when it continues.
 # -mmin +1 matches a file with no write for more than 60 s, with GNU and BSD find.
 # Never use +0: it matches a file that is 1 second old.
 sweep() {
   [ -d "$base" ] || return 0
-  find "$base" -mindepth 2 -maxdepth 2 -type f -mmin +1 -delete 2>/dev/null
-  find "$base" -mindepth 1 -maxdepth 1 -type d -empty -delete 2>/dev/null
+  find "$base" -mindepth 1 -maxdepth 1 -type f -mmin +1 -delete 2>/dev/null
 }
 
 # --- Arguments ---------------------------------------------------------------
@@ -234,8 +233,7 @@ now_ms() { # sets now to a clock in milliseconds, with no new process. Bash 3 co
 
 open_file() { # names the run file, at the first tag. A failed write creates the directory.
   [ -z "$file" ] || return 0
-  dir="$base/$session"
-  file="$dir/$$-$(date +%s)"
+  file="$base/$session.$$-$(date +%s)"
 }
 
 write_file() { # rewrites the whole run file from memory, with no new process
@@ -258,10 +256,11 @@ write_file() { # rewrites the whole run file from memory, with no new process
   done
   # The plugin uses a read only when it ends with this line, so a half-written file never counts.
   out+=end$'\n'
-  # A sweep can delete the directory of a new or paused run. So a failed write creates it
-  # and tries once more. A failure never stops later writes, but it warns only once.
+  # The first write of a new install, or one after a person deleted the directory, fails.
+  # So a failed write creates it and tries once more. A failure never stops later writes,
+  # but it warns only once.
   if ! printf '%s' "$out" 2>/dev/null > "$file" \
-    && ! { (umask 077 && mkdir -p "$dir") 2>/dev/null && printf '%s' "$out" 2>/dev/null > "$file"; }; then
+    && ! { (umask 077 && mkdir -p "$base") 2>/dev/null && printf '%s' "$out" 2>/dev/null > "$file"; }; then
     [ -n "$warned" ] || warn "cannot write $file"
     warned=1
   fi

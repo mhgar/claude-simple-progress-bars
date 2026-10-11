@@ -27,14 +27,14 @@ check() {
 }
 
 exists() { [ -e "$1" ] && echo yes || echo no; }
-# await_file DIR: waits up to 10 s for a run file in DIR.
-await_file() { local i; for ((i = 0; i < 100; i++)); do [ -n "$(find "$1" -type f ! -name '.*' 2>/dev/null)" ] && return; sleep 0.1; done; }
+# await_file PREFIX: waits up to 10 s for a run file PREFIX.*, as <progress dir>/<session id>.
+await_file() { local i f; for ((i = 0; i < 100; i++)); do for f in "$1".*; do [ -f "$f" ] && return; done; sleep 0.1; done; }
 yes_if() { if "$@"; then echo yes; else echo no; fi; }
 matches() { [[ $1 =~ $2 ]]; }
-# runs SESSION: the number of run files in a session directory.
-runs() { find "$BASE/$1" -type f ! -name '.*' 2>/dev/null | wc -l | tr -d ' '; }
+# runs SESSION: the number of run files of a session.
+runs() { local f n=0; for f in "$BASE/$1".*; do [ -f "$f" ] && n=$((n + 1)); done; echo "$n"; }
 # runfile SESSION: the lines of the one run file of a session, joined with |.
-runfile() { local f; for f in "$BASE/$1"/*; do [ -f "$f" ] && tr '\n' '|' < "$f"; done; }
+runfile() { local f; for f in "$BASE/$1".*; do [ -f "$f" ] && tr '\n' '|' < "$f"; done; }
 # wrap SESSION ARGS...: runs the wrapper in a session of its own, so that each run file is easy to find.
 wrap() { local s=$1; shift; CLAUDE_CODE_SESSION_ID=$s "$P" "$@"; }
 
@@ -118,8 +118,8 @@ check "a closed output does not stop the command" "task 1 - c|[1] 3/3|[1] done|e
 
 wrap format -n render sh -c 'echo "[progress] 2/10"; echo "[progress:frames] 5/40"; exit 1' > /dev/null
 check "the run file holds tasks, reports, and end" "task 1 - render|[1] 2/10|[1] fail exit 1|task 2 1 frames|[2] 5/40|[2] fail exit 1|end|" "$(runfile format)"
-name=$(basename "$(find "$BASE/format" -type f ! -name '.*')")
-check "the run file is named <pid>-<start>" yes "$(yes_if matches "$name" '^[0-9]+-[0-9]{10}$')"
+name=$(basename "$BASE"/format.*)
+check "the run file name starts with the session ID and a dot" yes "$(yes_if matches "$name" '^format\.[0-9]+-[0-9]{10}$')"
 wrap adds -n r sh -c 'echo "[progress] total 1000"; i=0; while [ $i -lt 1000 ]; do echo "[progress] +1"; i=$((i + 1)); done; echo "[progress] fail stop"'
 check "whole-number adds become one sum" "task 1 - r|[1] total 1000|[1] +1000|[1] fail stop|end|" "$(runfile adds)"
 wrap sizes -n r sh -c 'echo "[progress] +1.5G"; echo "[progress] +2"; echo "[progress] +512M"; echo "[progress] fail x"'
@@ -135,14 +135,14 @@ sleep 1.5 # bash 3 reads whole seconds
 check "a held tag reaches the file" "[1] 2/3" "$(runfile held | cut -d'|' -f2)"
 wait $w
 # NTFS under Git Bash has no modes.
-[ -z "$IS_WINDOWS" ] && check "the session directory is private" 700 "$(stat -c %a "$BASE/format" 2>/dev/null || stat -f %Lp "$BASE/format")"
+[ -z "$IS_WINDOWS" ] && check "the progress directory is private" 700 "$(stat -c %a "$BASE" 2>/dev/null || stat -f %Lp "$BASE")"
 
 # --- The heartbeat
 
 CLAUDE_CODE_SESSION_ID=beat "$P" -n hb sh -c 'echo "[progress] 1/2"; sleep 8; echo "[progress] fail x"' &
 w=$!
 sleep 7
-f=$(find "$BASE/beat" -type f ! -name '.*')
+f=$(ls "$BASE"/beat.*)
 age=$(($(date +%s) - $(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f")))
 check "the heartbeat keeps a quiet run file fresh" yes "$(yes_if [ "$age" -le 6 ])"
 wait $w
@@ -160,31 +160,32 @@ check "-n with no value warns" "claude-progress: -n needs a value" "$out"
 out=$("$P" -n x 2>&1)
 check "no command warns" "claude-progress: no command to run. See claude-progress --help" "$out"
 if [ -z "$IS_WINDOWS" ]; then
-  # A file keeps the cleanup from deleting the empty directory.
-  mkdir -p "$BASE/ro-session" && echo end > "$BASE/ro-session/keep" && chmod 500 "$BASE/ro-session"
-  out=$(wrap ro-session -n x sh -c 'echo "[progress] 1/2"; echo ran; exit 5' 2>&1)
+  # A progress directory of its own, so that the other runs can still write.
+  mkdir -p "$TMP/ro/progress" && chmod 500 "$TMP/ro/progress"
+  out=$(CLAUDE_CONFIG_DIR="$TMP/ro" wrap ro -n x sh -c 'echo "[progress] 1/2"; echo ran; exit 5' 2>&1)
   check "a failed write keeps the exit status" 5 "$?"
   check "a failed write warns once, and the command runs" yes "$(yes_if matches "$out" '^claude-progress: cannot write[^'$'\n'']*'$'\n''ran$')"
-  chmod 700 "$BASE/ro-session"
+  chmod 700 "$TMP/ro/progress"
 
-  mkdir -p "$BASE/ro-back" && echo end > "$BASE/ro-back/keep" && chmod 500 "$BASE/ro-back"
-  wrap ro-back -n x sh -c 'echo "[progress] 1/2"; sleep 2; echo "[progress] 2/2"' 2>/dev/null &
+  mkdir -p "$TMP/ro-back/progress" && chmod 500 "$TMP/ro-back/progress"
+  CLAUDE_CONFIG_DIR="$TMP/ro-back" wrap back -n x sh -c 'echo "[progress] 1/2"; sleep 2; echo "[progress] 2/2"' 2>/dev/null &
   w=$!
   sleep 1
-  chmod 700 "$BASE/ro-back"
+  chmod 700 "$TMP/ro-back/progress"
   wait $w
-  check "writes work again after write access comes back" "task 1 - x|[1] 2/2|[1] done|end|" "$(tr '\n' '|' < "$(ls "$BASE"/ro-back/[0-9]*)")"
+  check "writes work again after write access comes back" "task 1 - x|[1] 2/2|[1] done|end|" "$(tr '\n' '|' < "$(ls "$TMP"/ro-back/progress/back.*)")"
 fi
 
 # --- Write again after a delete
 
-CLAUDE_CODE_SESSION_ID=gone "$P" -n g sh -c 'echo "[progress] 1/2"; sleep 2; echo "[progress] 2/2"' &
+GONE="$TMP/gone/progress"
+CLAUDE_CONFIG_DIR="$TMP/gone" CLAUDE_CODE_SESSION_ID=gone "$P" -n g sh -c 'echo "[progress] 1/2"; sleep 2; echo "[progress] 2/2"' &
 w=$!
-await_file "$BASE/gone"
-rm -rf "$BASE/gone"
+await_file "$GONE/gone"
+rm -rf "$GONE"
 wait $w
-check "a deleted session directory comes back at the next write" "task 1 - g|[1] 2/2|[1] done|end|" "$(runfile gone)"
-[ -z "$IS_WINDOWS" ] && check "a directory made again is private" 700 "$(stat -c %a "$BASE/gone" 2>/dev/null || stat -f %Lp "$BASE/gone")"
+check "a deleted progress directory comes back at the next write" "task 1 - g|[1] 2/2|[1] done|end|" "$(cat "$GONE"/gone.* 2>/dev/null | tr '\n' '|')"
+[ -z "$IS_WINDOWS" ] && check "a progress directory made again is private" 700 "$(stat -c %a "$GONE" 2>/dev/null || stat -f %Lp "$GONE")"
 
 # --- Directories and help
 
@@ -203,24 +204,26 @@ stamp() {
 leftover() { mkdir -p "$1" && printf 'task 1 - x\nend\n' > "$1/$2" && touch -c -t "$(stamp "$3")" "$1/$2"; }
 
 CLAUDE_PID=$$ wrap owned sh -c 'echo "[progress] 1/2"'
-check "a run writes no .owner file, also with CLAUDE_PID set" no "$(exists "$BASE/owned/.owner")"
+check "a run makes no directory and no .owner file, also with CLAUDE_PID set" "0 no" \
+  "$(find "$BASE" -mindepth 1 -type d | wc -l | tr -d ' ') $(exists "$BASE/.owner")"
 
 # Each start in a session cleans up, so the old files come after the last such start.
-leftover "$BASE/ended" 1-1700000000 180
-leftover "$BASE/ended" .owner 172800
-leftover "$BASE/mixed" 2-1700000000 180
-leftover "$BASE/mixed" 3-1700000000 5
+leftover "$BASE" ended.1-1700000000 180
+leftover "$BASE" mixed.2-1700000000 180
+leftover "$BASE" mixed.3-1700000000 5
+leftover "$BASE/old-session" 1-1700000000 180
+leftover "$BASE/old-session" .owner 172800
 env -u CLAUDE_CODE_SESSION_ID "$P" true
-check "outside a session nothing goes" yes "$(exists "$BASE/ended/1-1700000000")"
+check "outside a session nothing goes" yes "$(exists "$BASE/ended.1-1700000000")"
 wrap sweeper true
 
-check "a file with no write for 3 minutes goes" no "$(exists "$BASE/mixed/2-1700000000")"
-check "a file with a write 5 seconds ago stays" yes "$(exists "$BASE/mixed/3-1700000000")"
-check "an old .owner goes" no "$(exists "$BASE/ended/.owner")"
-check "an empty session directory goes" no "$(exists "$BASE/ended")"
-check "a run with no tag creates no directory" no "$(exists "$BASE/sweeper")"
+check "a file with no write for 3 minutes goes" no "$(exists "$BASE/mixed.2-1700000000")"
+check "a file with a write 5 seconds ago stays" yes "$(exists "$BASE/mixed.3-1700000000")"
+check "a session directory of an earlier version stays" "yes yes" \
+  "$(exists "$BASE/old-session/1-1700000000") $(exists "$BASE/old-session/.owner")"
+check "a run with no tag creates no run file" 0 "$(runs sweeper)"
 
-check "no temporary files are left" 0 "$(find "$BASE" -name '.*' -type f | wc -l | tr -d ' ')"
+check "no temporary files are left" 0 "$(find "$BASE" -maxdepth 1 -name '.*' -type f | wc -l | tr -d ' ')"
 
 # --- The PowerShell twin, where it is installed
 #
@@ -248,7 +251,7 @@ echo "[progress:gone] clear"; echo "[progress] fail boom"; exit 3'
     echo "$?" > "$TMP/$impl.status"
   done
   check "PowerShell keeps the exit status" "$(cat "$TMP/sh.status")" "$(cat "$TMP/ps.status")"
-  check "PowerShell writes the same run file as bash" "" "$(diff "$TMP"/twin-sh/progress/twin/* "$TMP"/twin-ps/progress/twin/* 2>&1)"
+  check "PowerShell writes the same run file as bash" "" "$(diff "$TMP"/twin-sh/progress/twin.* "$TMP"/twin-ps/progress/twin.* 2>&1)"
   check "PowerShell writes the same output as bash" "$(cat "$TMP/sh.out")" "$(tr -d '\r' < "$TMP/ps.out")"
   check "PowerShell writes the same errors as bash" "$(cat "$TMP/sh.err")" "$(tr -d '\r' < "$TMP/ps.err")"
   out=$(env -u CLAUDE_CODE_SESSION_ID "$PS" -NoProfile -ExecutionPolicy Bypass -File "$(native "$ROOT/scripts/claude-progress.ps1")" "$(native "$BASH_EXE")" -c 'echo "[progress] 1/2"; exit 4' | tr -d '\r'; echo "exit ${PIPESTATUS[0]}")
@@ -260,29 +263,29 @@ echo "[progress:gone] clear"; echo "[progress] fail boom"; exit 3'
   w=$!
   await_file "$TMP/held-ps/progress/held"
   sleep 0.5
-  check "PowerShell: a held tag reaches the file" "[1] 2/3" "$(cat "$TMP"/held-ps/progress/held/* 2>/dev/null | sed -n 2p)"
+  check "PowerShell: a held tag reaches the file" "[1] 2/3" "$(cat "$TMP"/held-ps/progress/held.* 2>/dev/null | sed -n 2p)"
   wait $w
 
   PSB="$TMP/sweep-ps/progress"
-  leftover "$PSB/closed" 1-1700000000 180
-  leftover "$PSB/mixed" 2-1700000000 180
-  leftover "$PSB/mixed" 3-1700000000 5
+  leftover "$PSB" mixed.2-1700000000 180
+  leftover "$PSB" mixed.3-1700000000 5
+  leftover "$PSB/old-session" 1-1700000000 180
   CLAUDE_CONFIG_DIR=$(native "$TMP/sweep-ps") CLAUDE_CODE_SESSION_ID=sweeper "$PS" -NoProfile -ExecutionPolicy Bypass \
     -File "$(native "$ROOT/scripts/claude-progress.ps1")" "$(native "$BASH_EXE")" -c 'true'
-  check "PowerShell: a file with no write for 3 minutes goes" no "$(exists "$PSB/mixed/2-1700000000")"
-  check "PowerShell: a file with a write 5 seconds ago stays" yes "$(exists "$PSB/mixed/3-1700000000")"
-  check "PowerShell: an empty session directory goes" no "$(exists "$PSB/closed")"
+  check "PowerShell: a file with no write for 3 minutes goes" no "$(exists "$PSB/mixed.2-1700000000")"
+  check "PowerShell: a file with a write 5 seconds ago stays" yes "$(exists "$PSB/mixed.3-1700000000")"
+  check "PowerShell: a session directory of an earlier version stays" yes "$(exists "$PSB/old-session/1-1700000000")"
 
   CLAUDE_CONFIG_DIR=$(native "$TMP/gone-ps") CLAUDE_CODE_SESSION_ID=gone "$PS" -NoProfile -ExecutionPolicy Bypass \
     -File "$(native "$ROOT/scripts/claude-progress.ps1")" -n g "$(native "$BASH_EXE")" -c 'echo "[progress] 1/2"; sleep 2; echo "[progress] 2/2"' &
   w=$!
   await_file "$TMP/gone-ps/progress/gone"
-  rm -rf "$TMP/gone-ps/progress/gone"
+  rm -rf "$TMP/gone-ps/progress"
   wait $w
-  check "PowerShell: a deleted session directory comes back at the next write" "task 1 - g|[1] 2/2|[1] done|end|" \
-    "$(cat "$TMP"/gone-ps/progress/gone/* 2>/dev/null | tr '\n' '|')"
-  [ -z "$IS_WINDOWS" ] && check "PowerShell: a directory made again is private" 700 \
-    "$(stat -c %a "$TMP/gone-ps/progress/gone" 2>/dev/null || stat -f %Lp "$TMP/gone-ps/progress/gone")"
+  check "PowerShell: a deleted progress directory comes back at the next write" "task 1 - g|[1] 2/2|[1] done|end|" \
+    "$(cat "$TMP"/gone-ps/progress/gone.* 2>/dev/null | tr '\n' '|')"
+  [ -z "$IS_WINDOWS" ] && check "PowerShell: a progress directory made again is private" 700 \
+    "$(stat -c %a "$TMP/gone-ps/progress" 2>/dev/null || stat -f %Lp "$TMP/gone-ps/progress")"
   if [ -n "$IS_WINDOWS" ]; then
     # cmd.exe reads the command line of a batch file first. Each argument must reach the script as text.
     { printf '@echo off\r\nsetlocal EnableDelayedExpansion\r\n'

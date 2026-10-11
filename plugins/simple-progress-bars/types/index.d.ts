@@ -9,7 +9,7 @@ export type BarUnit = '' | 'B' | '%'
 
 /** One task as the plugin shows it. All times are ms since the epoch. */
 export type Bar = {
-  /** The run file path and the task ID: unique across the watched session directories. */
+  /** The run file path and the task ID: unique across the watched sessions. */
   key: string
   /** The path of the run file. */
   file: string

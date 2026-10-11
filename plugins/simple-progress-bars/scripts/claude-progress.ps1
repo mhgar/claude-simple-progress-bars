@@ -1,7 +1,7 @@
 # claude-progress.ps1: run a command, and show its [progress] lines as Claude Code progress bars.
 #
 # The PowerShell twin of scripts/claude-progress.sh. It takes the same arguments, follows
-# the same rules, and writes the same run file, <dir>/<session id>/<pid>-<start>. The
+# the same rules, and writes the same run file, <dir>/<session id>.<pid>-<start>. The
 # plugin gives Claude this file's path:
 #   & "<plugin>/scripts/claude-progress.ps1" -n render ./render.ps1
 
@@ -37,25 +37,21 @@ Options:
   -h, --help  show this reference
 
 Outside a Claude Code session, the wrapper runs COMMAND and changes nothing.
-Files: <dir>/<session id>/<pid>-<start>, where <dir> is $env:CLAUDE_CONFIG_DIR/progress,
+Files: <dir>/<session id>.<pid>-<start>, where <dir> is $env:CLAUDE_CONFIG_DIR/progress,
 or ~/.claude/progress. At each start in a session, the wrapper deletes the files
-in <dir> with no write for 1 to 2 minutes, and the empty session directories.
+in <dir> with no write for 1 to 2 minutes.
 '@
 }
 
 function Write-Warn([string]$Message) { [Console]::Error.WriteLine("claude-progress: $Message") }
 
-# Deletes what ended runs left, in every session directory. A live wrapper writes its file
-# at least every 5 seconds, so a file with no write for a minute belongs to a run that is
-# over or paused. A paused run writes its whole file again when it continues.
-# The .NET calls fail where Remove-Item can prompt, as for a directory that is no longer empty.
+# Deletes what ended runs of every session left. A live wrapper writes its file at least
+# every 5 seconds, so a file with no write for a minute belongs to a run that is over or
+# paused. A paused run writes its whole file again when it continues.
 function Invoke-Sweep([string]$Base) {
   $limit = [DateTime]::UtcNow.AddSeconds(-60)
-  foreach ($d in Get-ChildItem -LiteralPath $Base -Directory -Force -ErrorAction SilentlyContinue) {
-    foreach ($f in Get-ChildItem -LiteralPath $d.FullName -File -Force -ErrorAction SilentlyContinue) {
-      if ($f.LastWriteTimeUtc -lt $limit) { try { [IO.File]::Delete($f.FullName) } catch { } }
-    }
-    try { [IO.Directory]::Delete($d.FullName) } catch { } # only when empty
+  foreach ($f in Get-ChildItem -LiteralPath $Base -File -Force -ErrorAction SilentlyContinue) {
+    if ($f.LastWriteTimeUtc -lt $limit) { try { [IO.File]::Delete($f.FullName) } catch { } }
   }
 }
 
@@ -224,7 +220,6 @@ function Get-Tag([string]$Line) {
 # --- The run file --------------------------------------------------------------
 
 $script:file = ''
-$script:dir = ''
 $script:warned = $false
 $script:lastWrite = [long]0
 # The plugin reads run files 4 times a second, so more writes only slow COMMAND down.
@@ -236,8 +231,7 @@ $utf8 = New-Object Text.UTF8Encoding $false
 # Names the run file, at the first tag. A failed write creates the directory.
 function Open-File {
   if ($script:file) { return }
-  $script:dir = Join-Path $base $session
-  $script:file = Join-Path $script:dir "$PID-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+  $script:file = Join-Path $base "$session.$PID-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
 }
 
 # Rewrites the whole run file from memory.
@@ -261,14 +255,15 @@ function Write-RunFile {
   }
   # The plugin uses a read only when it ends with this line, so a half-written file never counts.
   [void]$sb.Append("end`n")
-  # A sweep can delete the directory of a new or paused run. So a failed write creates it
-  # and tries once more. A failure never stops later writes, but it warns only once.
+  # The first write of a new install, or one after a person deleted the directory, fails.
+  # So a failed write creates it and tries once more. A failure never stops later writes,
+  # but it warns only once.
   $text = $sb.ToString()
   try { [IO.File]::WriteAllText($script:file, $text, $utf8) } catch {
     try {
       # Private where the system has modes. Windows PowerShell 5.1 has no $IsLinux and no modes.
-      if ($IsLinux -or $IsMacOS) { [void][IO.Directory]::CreateDirectory($script:dir, [IO.UnixFileMode]'UserRead, UserWrite, UserExecute') }
-      else { [void][IO.Directory]::CreateDirectory($script:dir) }
+      if ($IsLinux -or $IsMacOS) { [void][IO.Directory]::CreateDirectory($base, [IO.UnixFileMode]'UserRead, UserWrite, UserExecute') }
+      else { [void][IO.Directory]::CreateDirectory($base) }
       [IO.File]::WriteAllText($script:file, $text, $utf8)
     } catch {
       if (-not $script:warned) { Write-Warn "cannot write $($script:file)" }

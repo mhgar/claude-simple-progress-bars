@@ -96,7 +96,7 @@ claude-progress -n render ssh -q HOST 'tail -n +1 -F render.log'
 `-n +1` replays the log from the start, so a new follower shows the full state. The bar ends at the job's `done` or `fail`. `tail -F` does not exit, so stop the follower after the end. If the follower connection drops, start it again.
 
 ## When a bar is wrong
-- No bar: the command printed no tag, the run is outside Claude Code (no `CLAUDE_CODE_SESSION_ID`), the tag is not at the start of a line, or the output sits in a buffer. Check with `--dir` and list `<dir>/$CLAUDE_CODE_SESSION_ID`.
+- No bar: the command printed no tag, the run is outside Claude Code (no `CLAUDE_CODE_SESSION_ID`), the tag is not at the start of a line, or the output sits in a buffer. Check with `--dir`, and list the files in it that start with `$CLAUDE_CODE_SESSION_ID.`.
 - Tags show in the output: the wrapper is not around the command, or the run is outside Claude Code.
 - `stopped` while the job runs: the wrapper was killed, or the job is outside the wrapper.
 - `no update`: no tag for 30 s. Print tags more often, or a text status.
@@ -104,9 +104,9 @@ claude-progress -n render ssh -q HOST 'tail -n +1 -F render.log'
 ## How it works
 The plugin has two parts: the wrapper, and a set of hooks inside Claude Code.
 1. The wrapper runs COMMAND, and reads its standard output and standard error. It reads the session ID from `CLAUDE_CODE_SESSION_ID`, which Claude Code sets in every shell call.
-2. The wrapper holds the state of each task in memory. After a tag, it rewrites one run file, `${CLAUDE_CONFIG_DIR:-~/.claude}/progress/<session id>/<pid>-<start>`, at most every 0.2 s. It also rewrites the file every 5 s while COMMAND is quiet.
-3. The plugin reads the session's folder 4 times a second, and draws a row for each task. A run file that has not changed for 10 s belongs to a wrapper that is gone or paused, so its running tasks show `stopped`. A paused wrapper writes its whole file again when it continues.
-4. At each start in a session, the wrapper deletes the files with no write for 1 to 2 minutes, in every session folder, and then the empty folders. Keep no other files in `<dir>`.
+2. The wrapper holds the state of each task in memory. After a tag, it rewrites one run file, `${CLAUDE_CONFIG_DIR:-~/.claude}/progress/<session id>.<pid>-<start>`, at most every 0.2 s. It also rewrites the file every 5 s while COMMAND is quiet.
+3. The plugin lists the progress folder 4 times a second, reads the run files of its session, and draws a row for each task. A run file that has not changed for 10 s belongs to a wrapper that is gone or paused, so its running tasks show `stopped`. A paused wrapper writes its whole file again when it continues.
+4. At each start in a session, the wrapper deletes the files in `<dir>` with no write for 1 to 2 minutes, from every session. Keep no other files in `<dir>`.
 
 - Tags cost no process, so print them at any rate.
 - Outside Claude Code, the wrapper runs COMMAND and passes every line through, also tags.
