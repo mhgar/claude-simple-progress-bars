@@ -10,15 +10,17 @@ You do not need to set anything up: Claude adds progress to long work by itself,
 
 ## Install
 
-```
-claude plugin install simple-progress-bars@anthropic-plugin-directory
-```
-
-Or, for the newest version, install it from this repository:
+For the newest version, install it from this repository:
 
 ```
 claude plugin marketplace add mhgar/claude-simple-progress-bars
 claude plugin install simple-progress-bars@simple-progress-bars
+```
+
+This plugin is also available in the official Anthropic directory, but is currently on a much older version:
+
+```
+claude plugin install simple-progress-bars@anthropic-plugin-directory
 ```
 
 It needs Claude Code v2.1.287 or later, on Linux, macOS, or Windows. Start a new session after the install.
